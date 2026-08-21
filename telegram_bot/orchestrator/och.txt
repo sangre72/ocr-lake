@@ -656,6 +656,17 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
 - ★If ocrlakebot's token is ever rotated, this shared copy on kong-bot's side goes stale — no automatic
   sync exists. Re-share manually if rotated(low-priority since this is a single-user local-machine setup).
 
+## 10-C. License policy (mirrors kong-bot, established 2026-08-22)
+
+> User: "라이센스는 개인 무료 회사 유료 kongbot 에 있는거로"(license = personal free, company paid, same as kong-bot).
+
+- ocr-lake uses the **same license as kong-bot**: `PolyForm Noncommercial License 1.0.0`(`./LICENSE`, copied
+  verbatim from `~/git/kong-bot/LICENSE` — same copyright holder, same terms, no per-project text changes needed).
+- **Personal/noncommercial use**(research·learning·hobby·nonprofit·education) = free.
+- **Commercial use**(companies) = requires a separate paid commercial license agreement — contact maintainer.
+- README.md has a `## License` section mirroring kong-bot's wording. If kong-bot's license terms/copyright
+  holder ever change, check whether ocr-lake's copy needs the same update(no automatic sync).
+
 ## 11.5. ★★★ VERIFY before stating + decide WHERE to record first (MUST)
 
 > **Bg incident(repeated in same session)**: orch stated things w/o measuring, became "lies" —
