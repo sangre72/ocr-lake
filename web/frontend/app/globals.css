@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fffaf3;
+  --surface: #ffffff;
+  --foreground: #2b2320;
+  --muted: #7a6f66;
+  --brand: #e8752c;
+  --brand-dark: #c4571a;
+  --success: #2f9e58;
+  --warn: #d99a1b;
+  --danger: #d64545;
+  --info: #3c7fd9;
+  --border: #ece1d6;
+  --radius-md: 0.75rem;
+  --radius-lg: 1.25rem;
+  --shadow-card: 0 4px 16px rgba(120, 72, 24, 0.08);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1c1512;
+    --surface: #2a201b;
+    --foreground: #f3ece5;
+    --muted: #b9aa9d;
+    --border: #3c2f28;
+    --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+.site-header {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.site-header nav {
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.9rem 1.25rem;
+}
+
+.site-header .brand {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--brand-dark);
+  text-decoration: none;
+}
+
+.site-header nav a:not(.brand) {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.6rem;
+}
+
+.site-header nav a:hover,
+.site-header nav a:focus-visible {
+  color: var(--brand-dark);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.site-header nav a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 1.5rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  padding: 0.6rem 1.25rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-dark);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.badge-success {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.badge-warn {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: #8a5c0c;
+}
+
+.badge-info {
+  background: color-mix(in srgb, var(--info) 16%, transparent);
+  color: var(--info);
+}
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  background: var(--surface);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropzone.dropzone-active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface));
+}
+
+@media (max-width: 480px) {
+  main {
+    padding: 1rem 0.9rem 2.5rem;
+  }
+  .card {
+    padding: 1.1rem;
+  }
+}

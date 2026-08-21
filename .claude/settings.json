@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "cat /Users/bumsuklee/git/sky/logs/scheduler-status.txt 2>/dev/null || echo '⚠ 감시 미기동'",
+    "refreshInterval": 5
+  }
+}

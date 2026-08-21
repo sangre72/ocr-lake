@@ -1,0 +1,56 @@
+# === 민감정보 (절대 커밋 금지) ===
+.env
+*.env
+**/.env
+.env.local
+**/.env.local
+!**/.env.example
+telegram_bot/orchestrator/.env
+
+# === 의존성·빌드 산출물 ===
+node_modules/
+**/node_modules/
+web/.next/
+web/out/
+web/build/
+dist/
+*.tsbuildinfo
+
+# === 런타임·로그·임시 ===
+logs/
+*.log
+web/dev-server.log
+web/dev-server.pid
+telegram_bot/orchestrator/protocol/refs/
+telegram_bot/orchestrator/protocol/u/
+telegram_bot/orchestrator/protocol/a/
+telegram_bot/orchestrator/protocol/done/
+telegram_bot/orchestrator/protocol/archive/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# === Playwright ===
+web/test-results/
+web/playwright-report/
+web/e2e/screenshots/*.png
+
+# === OS·에디터 ===
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+
+# 업로드 파일(로컬 저장 — 커밋 금지)
+web/uploads/
+web/public/uploads/
+**/uploads/
+
+# 로컬 SQLite DB(처리 이력 — 커밋 금지)
+data/
+*.db
+*.db-journal
+
+# API 키 등 민감정보 포함 로컬 문서(프로젝트 내 보관하되 git 제외, user 2026-08-10)
+*.local.md
