@@ -619,12 +619,24 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
     inbound traffic on ocrlakebot's own token, which orch already controls.
 - **SCOPE**: kong-bot-family repos only(sibling projects under `~/git/` — sky, ocr-lake, fortune, zodiac etc) —
   not a general public-facing API. No auth beyond filesystem access(local machine, single-user).
-- **★10-A-3 — Telegram blocks bot↔bot DMs entirely(measured: 400 Bad Request)**: don't design any cross-project
-  flow assuming one bot(kong2019_bot) can `sendMessage`/`sendPhoto` directly to another bot(ocrlakebot) — Telegram
-  platform-level rejects it regardless of chat_id/allowlist config(this is NOT a `TELEGRAM_ALLOWED_CHAT_IDS`
-  permission issue — confirmed by direct API test). The only viable image/data-relay path between sibling bots is
-  **via the human user**: bot-A sends artifact to the human's chat → human forwards it to bot-B. Plan requests
-  for "please send me a captured image" accordingly — always route through the user, never assume bot-to-bot delivery.
+- **★10-A-3 — Telegram DOES block direct bot-account-to-bot-account DM(measured: 400 Bad Request when orch tried
+  sending FROM ocrlakebot's token TO kong2019_bot's own bot-id as chat_id)** — but ★DON'T over-generalize this
+  (real mistake, corrected same-day): a bot sending a message/photo to the **human user's own chat_id** using
+  ANOTHER bot's token(e.g. kong-bot's worker calling ocrlakebot's `sendPhoto` API w/ chat_id=human-user) is
+  **NOT bot-to-bot DM** — it's a normal bot→human send, and the human's chat_id being in that bot's
+  `TELEGRAM_ALLOWED_CHAT_IDS`(or receiving side having no allowlist-block) is what actually gates it. That
+  pattern generally works. So:
+  - What's actually blocked: `sendMessage(chat_id=<other-bot's-own-account-id>)` — platform-level, unfixable.
+  - What's NOT blocked: `sendMessage(chat_id=<human-user's-chat_id>)` using any bot's token, incl. borrowing
+    another project's token — this is just bot→human, works normally(subject to that bot's own allowlist).
+  - When cross-project delivery via Telegram silently fails, **don't assume "bot↔bot DM" as the cause without
+    checking whether the target chat_id is actually a bot-account vs the human's own chat_id first**(§11.5 rule-A
+    — verify before asserting). If the human's chat_id was the target and it still didn't arrive, suspect other
+    causes(getUpdates offset consumed by wrong poller, wrong token, msg sent but client-side notification
+    swallowed — check via direct `getUpdates` call for pending count, not just local receive-logs).
+  - **Preferred path regardless**: SHARED_OUT/SHARED_IN(§10-A, file+manifest pull) is simpler+more reliable than
+    debugging Telegram delivery across bots — when in doubt, just pull the artifact file directly instead of
+    chasing a telegram-send success/failure.
 
 ## 11.5. ★★★ VERIFY before stating + decide WHERE to record first (MUST)
 
