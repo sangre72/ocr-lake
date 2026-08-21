@@ -578,6 +578,38 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
 - Bot token stored ONLY in `orchestrator/.env`. Never commit(.gitignore).
 - `TELEGRAM_ALLOWED_CHAT_IDS` can restrict allowed users(recommended in production).
 
+## 10-A. SHARED_IN (cross-project data pull from kong-bot, established 2026-08-21)
+
+> ★kong-bot(`~/git/kong-bot`, a screen-operating GUI agent driven via its own Telegram bot kong2019_bot) publishes
+> a **read-only, pull-based** artifact manifest for sibling projects to reference. ocr-lake is a **consumer**.
+
+- **PURPOSE**: kong-bot can capture screen content(e.g. test documents/receipts/photos for OCR testing) via its
+  own GUI-automation + Telegram flow. Instead of ocr-lake reinventing screen-capture, ocr-lake **requests** kong-bot
+  do it(via kong2019_bot Telegram msg, human-in-the-loop or orch-sent) then **pulls the result** from kong-bot's
+  published manifest.
+- **PROTOCOL DIRECTION — request vs share are DIFFERENT channels**:
+  - **Request(ocr-lake→kong-bot)**: kong-bot does **NOT** process incoming task-requests from other bots/projects
+    programmatically — it only **publishes**. So requesting kong-bot to do something(e.g. "capture a test image")
+    = send a normal Telegram message to kong2019_bot(token in `~/git/kong-bot/telegram_bot/orchestrator/.env`,
+    read directly by orch when explicitly user-approved — see §10-A-1 below) OR ask the human user to relay.
+    This is a one-off ask, NOT a standing API.
+  - **Share(kong-bot→ocr-lake)**: once kong-bot finalizes a cross-project-useful artifact(recipe/job-output),
+    it appends an entry to its own `telegram_bot/orchestrator/shared_out/manifest.json`. ocr-lake **pulls**
+    (reads that file) — kong-bot never pushes/notifies ocr-lake.
+- **LOCATION(kong-bot side, absolute path)**: `~/git/kong-bot/telegram_bot/orchestrator/shared_out/manifest.json`
+  — `{owner, updated, items:[{path, desc, updated, source_project}]}`. Real files live at kong-bot's normal repo
+  paths(`kaymaps/`·`jobs/`); manifest = **index only**, not a copy-store. ocr-lake reads the real file at kong-bot's
+  path(cross-repo absolute path), does NOT copy it into ocr-lake's repo.
+- **DISCOVERY(pull, on ocr-lake session boot)**: if a task might benefit from kong-bot artifacts(e.g. sample
+  test images/documents), check `~/git/kong-bot/telegram_bot/orchestrator/shared_out/manifest.json` for relevant
+  `items` before asking the user or doing net-new work. kong-bot does NOT push notifications here — pull only.
+- **★10-A-1 — direct kong-bot Telegram request requires EXPLICIT user approval each time**: orch may read
+  kong-bot's `.env` token and send a Telegram msg to kong2019_bot **only after the user explicitly approves in
+  THIS session**(not a standing permission — different-project credentials are sensitive, ask via Telegram per §11
+  round-trip each time it's needed, don't assume prior approval carries over).
+- **SCOPE**: kong-bot-family repos only(sibling projects under `~/git/` — sky, ocr-lake, fortune, zodiac etc) —
+  not a general public-facing API. No auth beyond filesystem access(local machine, single-user).
+
 ## 11.5. ★★★ VERIFY before stating + decide WHERE to record first (MUST)
 
 > **Bg incident(repeated in same session)**: orch stated things w/o measuring, became "lies" —
