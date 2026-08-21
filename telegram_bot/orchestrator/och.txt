@@ -607,6 +607,16 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
   kong-bot's `.env` token and send a Telegram msg to kong2019_bot **only after the user explicitly approves in
   THIS session**(not a standing permission — different-project credentials are sensitive, ask via Telegram per §11
   round-trip each time it's needed, don't assume prior approval carries over).
+- **★10-A-2 — INBOUND from another bot(e.g. kong-bot) requires NO extra approval — just check content and proceed**
+  (user: "타 봇에게 연락이 오면 내용 확인하고 진행하면 된다"). Direction matters:
+  - **Outbound**(ocr-lake→other-bot, orch initiates contact using another project's credentials) = §10-A-1 applies,
+    ask user first each time(touching someone else's token is the sensitive act).
+  - **Inbound**(another bot/project sends a msg/image TO ocrlakebot, e.g. kong-bot relaying a captured test image) =
+    this is just a normal Telegram message arriving at ocr-lake's OWN bot(u_* via normal §2 flow) — **no separate
+    approval needed**. Treat it like any user-originated request: read the content(§11.5 rule-A — verify what
+    was actually sent, don't assume), determine if it's real work(→a_ directive) or a simple reply, and proceed
+    normally. The sender being "another bot" instead of "the human user" doesn't change the protocol — it's still
+    inbound traffic on ocrlakebot's own token, which orch already controls.
 - **SCOPE**: kong-bot-family repos only(sibling projects under `~/git/` — sky, ocr-lake, fortune, zodiac etc) —
   not a general public-facing API. No auth beyond filesystem access(local machine, single-user).
 
