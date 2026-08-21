@@ -8,9 +8,9 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
-from telegram_bot.classify.engine import classify_image
-from telegram_bot.ocr.engine import extract_text
-from telegram_bot.vision.describer import DescriberNotConfiguredError, image_describe
+from core.classify.engine import classify_image
+from core.ocr.engine import extract_text
+from core.vision.describer import DescriberNotConfiguredError, image_describe
 
 logger = logging.getLogger(__name__)
 

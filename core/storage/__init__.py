@@ -1,4 +1,4 @@
-from telegram_bot.storage.db import (
+from core.storage.db import (
     get_record,
     init_db,
     list_records,

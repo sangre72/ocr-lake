@@ -12,6 +12,7 @@ export default function UploadCard() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewIsImage, setPreviewIsImage] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OcrRecord | null>(null);
@@ -20,6 +21,7 @@ export default function UploadCard() {
     setError(null);
     setResult(null);
     setPreviewUrl(URL.createObjectURL(file));
+    setPreviewIsImage(file.type.startsWith("image/"));
     setLoading(true);
     try {
       const record = await uploadImage(file);
@@ -49,7 +51,8 @@ export default function UploadCard() {
         이미지 업로드
       </h2>
       <p className="text-[var(--muted)] mb-4">
-        영수증·명함·문서 이미지를 올리면 텍스트를 추출합니다. 사물 사진은 자동으로 사진 경로로 분류됩니다.
+        영수증·명함·문서 이미지, PDF, 동영상을 올리면 텍스트를 추출합니다. 사물 사진은 자동으로 사진
+        경로로 분류됩니다.
       </p>
 
       <div
@@ -62,14 +65,16 @@ export default function UploadCard() {
         onDrop={onDrop}
       >
         <label htmlFor={inputId} className="block cursor-pointer">
-          <p className="font-medium mb-2">이미지를 이곳에 끌어다 놓거나 클릭해서 선택하세요</p>
-          <p className="text-sm text-[var(--muted)]">JPEG · PNG · WEBP · BMP · TIFF 지원</p>
+          <p className="font-medium mb-2">파일을 이곳에 끌어다 놓거나 클릭해서 선택하세요</p>
+          <p className="text-sm text-[var(--muted)]">
+            JPEG · PNG · WEBP · BMP · TIFF · PDF · MP4 지원
+          </p>
         </label>
         <input
           ref={inputRef}
           id={inputId}
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff"
+          accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff,application/pdf,video/mp4,video/quicktime,video/webm"
           className="sr-only"
           onChange={onInputChange}
         />
@@ -85,7 +90,7 @@ export default function UploadCard() {
         </div>
       </div>
 
-      {previewUrl && (
+      {previewUrl && previewIsImage && (
         <div className="mt-5">
           <p className="text-sm font-medium mb-2">미리보기</p>
           <Image

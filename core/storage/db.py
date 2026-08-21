@@ -14,7 +14,10 @@ from typing import Iterator, Literal, Optional
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "ocr_lake.db"
 
 Source = Literal["telegram", "web"]
-Route = Literal["document", "photo", "ambiguous_ocr", "ambiguous_photo"]
+Route = Literal[
+    "document", "photo", "ambiguous_ocr", "ambiguous_photo",
+    "pdf_document", "video_frames",
+]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS ocr_records (
@@ -22,7 +25,10 @@ CREATE TABLE IF NOT EXISTS ocr_records (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     source TEXT NOT NULL CHECK (source IN ('telegram', 'web')),
     image_path TEXT,
-    route TEXT NOT NULL CHECK (route IN ('document', 'photo', 'ambiguous_ocr', 'ambiguous_photo')),
+    route TEXT NOT NULL CHECK (route IN (
+        'document', 'photo', 'ambiguous_ocr', 'ambiguous_photo',
+        'pdf_document', 'video_frames'
+    )),
     extracted_text TEXT,
     description TEXT,
     structured_json TEXT,

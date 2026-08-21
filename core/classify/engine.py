@@ -12,7 +12,7 @@ from typing import Literal
 import pytesseract
 from PIL import Image
 
-from telegram_bot.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
+from core.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
 
 logger = logging.getLogger(__name__)
 

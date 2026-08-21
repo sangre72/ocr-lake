@@ -7,19 +7,12 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from telegram_bot.config import load_config
-from telegram_bot.ocr.engine import UnsupportedImageError
-from telegram_bot.ocr.structurer import StructurerNotConfiguredError, structure_text
-from telegram_bot.pipeline import process_image
-from telegram_bot.storage import save_record
+from telegram_bot.handlers.common import is_allowed, save_record_safely
+from core.ocr.engine import UnsupportedImageError
+from core.ocr.structurer import StructurerNotConfiguredError, structure_text
+from core.pipeline import process_image
 
 logger = logging.getLogger(__name__)
-
-
-def _is_allowed(update: Update, allowed_chat_ids: list[int]) -> bool:
-    if not allowed_chat_ids:
-        return True
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    return chat_id in allowed_chat_ids
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -32,7 +25,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = load_config()
-    if not _is_allowed(update, config.allowed_chat_ids):
+    if not is_allowed(update, config.allowed_chat_ids):
         await update.message.reply_text("이 봇을 사용할 권한이 없습니다.")
         return
 
@@ -64,7 +57,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("이미지 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
         return
 
-    _save_record_safely(
+    save_record_safely(
         route=result.route,
         chat_id=message.chat_id,
         extracted_text=result.text,
@@ -87,22 +80,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await message.reply_text(f"{label}\n추출된 텍스트:\n\n{reply}")
 
 
-def _save_record_safely(
-    *, route: str, chat_id: int, extracted_text: str | None, description: str | None
-) -> None:
-    """이력 저장 실패가 텔레그램 응답 흐름을 막지 않도록 격리."""
-    try:
-        save_record(
-            source="telegram",
-            route=route,
-            extracted_text=extracted_text,
-            description=description,
-            chat_id=chat_id,
-        )
-    except Exception:
-        logger.exception("OCR 이력 저장 실패(텔레그램 응답에는 영향 없음)")
-
-
 def _is_image_document(document) -> bool:
     mime = (document.mime_type or "").lower()
     return mime.startswith("image/")
@@ -110,7 +87,7 @@ def _is_image_document(document) -> bool:
 
 async def structure(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = load_config()
-    if not _is_allowed(update, config.allowed_chat_ids):
+    if not is_allowed(update, config.allowed_chat_ids):
         await update.message.reply_text("이 봇을 사용할 권한이 없습니다.")
         return
 

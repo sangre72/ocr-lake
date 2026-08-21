@@ -6,7 +6,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from telegram_bot.storage import init_db
+from core.storage import init_db
 from web.backend.routes import router
 
 app = FastAPI(title="OCR Lake API")

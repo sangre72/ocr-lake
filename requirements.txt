@@ -5,3 +5,5 @@ python-dotenv
 fastapi
 uvicorn
 python-multipart
+pdf2image
+opencv-python

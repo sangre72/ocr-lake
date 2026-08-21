@@ -13,15 +13,18 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
 
-from telegram_bot.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
-from telegram_bot.pipeline import process_image
-from telegram_bot.storage import get_record, list_records, record_to_dict, save_record
+from core.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
+from core.pdf import UnsupportedPdfError, process_pdf
+from core.pipeline import process_image
+from core.storage import get_record, list_records, record_to_dict, save_record
+from core.video import UnsupportedVideoError, process_video
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "uploads"
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB — telegram_bot.config 의 기본 max_image_size_mb 와 동일
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB — 이미지/PDF
+MAX_VIDEO_BYTES = 100 * 1024 * 1024  # 100MB — 동영상은 더 큰 편이라 별도 상한
 
 _EXT_BY_FORMAT = {
     "JPEG": ".jpg",
@@ -31,11 +34,31 @@ _EXT_BY_FORMAT = {
     "TIFF": ".tiff",
 }
 
+# 실행파일/스크립트는 여전히 차단(security-guideline.md) — 이미지 + pdf/mp4 만 화이트리스트 확장
+_PDF_CONTENT_TYPES = {"application/pdf"}
+_VIDEO_CONTENT_TYPES = {"video/mp4", "video/quicktime", "video/webm", "video/x-msvideo"}
+
+
+def _store_upload(raw_bytes: bytes, ext: str) -> Path:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored_path = UPLOAD_DIR / f"{uuid.uuid4().hex}{ext}"
+    stored_path.write_bytes(raw_bytes)
+    return stored_path
+
 
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)) -> dict:
-    image_bytes = await file.read()
+    content_type = (file.content_type or "").lower()
+    raw_bytes = await file.read()
 
+    if content_type in _PDF_CONTENT_TYPES:
+        return await _handle_pdf_upload(raw_bytes)
+    if content_type in _VIDEO_CONTENT_TYPES:
+        return await _handle_video_upload(raw_bytes)
+    return await _handle_image_upload(raw_bytes)
+
+
+async def _handle_image_upload(image_bytes: bytes) -> dict:
     if len(image_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="이미지가 너무 큽니다(최대 20MB).")
 
@@ -43,7 +66,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
         result = await process_image(image_bytes)
     except UnsupportedImageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception:
+    except Exception as exc:
         logger.exception("웹 업로드 이미지 처리 중 오류")
         raise HTTPException(status_code=500, detail="이미지 처리 중 오류가 발생했습니다.") from exc
 
@@ -52,11 +75,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
     if fmt not in ALLOWED_FORMATS:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 이미지 포맷입니다: {fmt}")
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}{_EXT_BY_FORMAT.get(fmt, '.bin')}"
-    stored_path = UPLOAD_DIR / stored_name
-    stored_path.write_bytes(image_bytes)
-
+    stored_path = _store_upload(image_bytes, _EXT_BY_FORMAT.get(fmt, ".bin"))
     record_id = save_record(
         source="web",
         route=result.route,
@@ -64,9 +83,66 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
         extracted_text=result.text,
         description=result.description,
     )
+    return record_to_dict(get_record(record_id))
 
-    record = get_record(record_id)
-    return record_to_dict(record)
+
+async def _handle_pdf_upload(pdf_bytes: bytes) -> dict:
+    if len(pdf_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="PDF가 너무 큽니다(최대 20MB).")
+
+    try:
+        result = await process_pdf(pdf_bytes)
+    except UnsupportedPdfError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("웹 업로드 PDF 처리 중 오류")
+        raise HTTPException(status_code=500, detail="PDF 처리 중 오류가 발생했습니다.") from exc
+
+    stored_path = _store_upload(pdf_bytes, ".pdf")
+    record_id = save_record(
+        source="web",
+        route="pdf_document",
+        image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
+        extracted_text=result.combined_text,
+        description=f"PDF {result.page_count}페이지 처리",
+        structured_json={
+            "pages": [
+                {"pageNumber": p.page_number, "route": p.pipeline_result.route}
+                for p in result.pages
+            ]
+        },
+    )
+    return record_to_dict(get_record(record_id))
+
+
+async def _handle_video_upload(video_bytes: bytes) -> dict:
+    if len(video_bytes) > MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=413, detail="동영상이 너무 큽니다(최대 100MB).")
+
+    try:
+        result = await process_video(video_bytes)
+    except UnsupportedVideoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("웹 업로드 동영상 처리 중 오류")
+        raise HTTPException(status_code=500, detail="동영상 처리 중 오류가 발생했습니다.") from exc
+
+    stored_path = _store_upload(video_bytes, ".mp4")
+    record_id = save_record(
+        source="web",
+        route="video_frames",
+        image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
+        extracted_text=result.combined_text or None,
+        description=f"동영상 {result.frame_count_sampled}프레임 샘플링, "
+        f"{len(result.document_frames)}개 프레임에서 텍스트 발견",
+        structured_json={
+            "frameCountSampled": result.frame_count_sampled,
+            "documentFrames": [
+                {"timestampSec": f.timestamp_sec} for f in result.document_frames
+            ],
+        },
+    )
+    return record_to_dict(get_record(record_id))
 
 
 @router.get("/records")
