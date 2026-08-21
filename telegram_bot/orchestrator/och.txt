@@ -638,6 +638,24 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
     debugging Telegram delivery across bots — when in doubt, just pull the artifact file directly instead of
     chasing a telegram-send success/failure.
 
+## 10-B. OUTBOUND credential-share to kong-bot (reverse direction of §10-A, established 2026-08-21)
+
+> User chose auto-push over manual-forward: kong-bot should call ocrlakebot's own Telegram API directly when
+> delivering ocr-lake-requested artifacts, instead of the user manually forwarding messages between bots.
+
+- **What was shared**: ocrlakebot's own bot token + target chat_id(=the human user's own chat_id, same across
+  both bots) were sent to kong-bot(via kong2019_bot Telegram msg) so kong-bot's workers can call
+  `sendPhoto`/`sendDocument` on ocrlakebot's API directly when an ocr-lake-requested job finishes.
+  This is safe per §10-A-3's clarification: sending to the human's own chat_id(not another bot-account) works
+  normally regardless of which project's token initiates it.
+- **Scope of use**: ocrlakebot's token shared w/ kong-bot is **for ocr-lake-requested-artifact delivery only** —
+  not a blanket credential hand-off. If kong-bot needs it for unrelated purposes, that's a separate ask.
+- **Still keep manifest.json registration in parallel**(§10-A pull-path) as a fallback — auto-push and
+  pull-manifest are complementary, not exclusive. If push silently fails(as happened once — see §10-A-3's
+  correction note), the manifest pull-path is still there to recover the artifact.
+- ★If ocrlakebot's token is ever rotated, this shared copy on kong-bot's side goes stale — no automatic
+  sync exists. Re-share manually if rotated(low-priority since this is a single-user local-machine setup).
+
 ## 11.5. ★★★ VERIFY before stating + decide WHERE to record first (MUST)
 
 > **Bg incident(repeated in same session)**: orch stated things w/o measuring, became "lies" —
