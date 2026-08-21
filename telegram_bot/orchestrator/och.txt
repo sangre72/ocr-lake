@@ -619,6 +619,12 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
     inbound traffic on ocrlakebot's own token, which orch already controls.
 - **SCOPE**: kong-bot-family repos only(sibling projects under `~/git/` — sky, ocr-lake, fortune, zodiac etc) —
   not a general public-facing API. No auth beyond filesystem access(local machine, single-user).
+- **★10-A-3 — Telegram blocks bot↔bot DMs entirely(measured: 400 Bad Request)**: don't design any cross-project
+  flow assuming one bot(kong2019_bot) can `sendMessage`/`sendPhoto` directly to another bot(ocrlakebot) — Telegram
+  platform-level rejects it regardless of chat_id/allowlist config(this is NOT a `TELEGRAM_ALLOWED_CHAT_IDS`
+  permission issue — confirmed by direct API test). The only viable image/data-relay path between sibling bots is
+  **via the human user**: bot-A sends artifact to the human's chat → human forwards it to bot-B. Plan requests
+  for "please send me a captured image" accordingly — always route through the user, never assume bot-to-bot delivery.
 
 ## 11.5. ★★★ VERIFY before stating + decide WHERE to record first (MUST)
 
