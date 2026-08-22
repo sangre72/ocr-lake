@@ -345,3 +345,11 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 - och.txt §10-B의 자동 push 경로(kong-bot이 ocrlakebot API로 직접 결과 전달)가 과거 한 차례 전달
   실패 사례가 있었음(§10-A-3의 정정 기록 — 원인은 봇-봇 DM 차단이 아니라 다른 요인으로 추정, 확정 원인
   미규명). 현재는 manifest pull(§10-A)이 폴백 경로로 병행 운영 중. 재발 시 원인 규명 필요.
+
+### 14-7. OCR 오인식 대처 + 휴먼 인터페이스 연동 `계획 — 기획 완료`
+- OCR은 100% 정확하지 않으므로, 오인식을 발견하고 사람이 직접 교정할 수 있는 흐름이 필요하다.
+- 상세 기획: [OCR 오인식 대처 + 휴먼 인터페이스 연동 기획](./planning/ocr-error-correction-design.md)
+  — 업무 의도, 오인식 발견 방법 3안 비교(1차 채택: 유저 능동 신고 + 항상 노출되는 수정 UI),
+  웹/텔레그램 휴먼 인터페이스 설계, `ocr_records` 스키마 확장 제안(`corrected_text`·`is_corrected`·
+  `corrected_at`), 구현 우선순위(P1: 웹 수정 UI → P2: 텔레그램 수정 버튼 → P3: word-level confidence
+  자동 하이라이트) 포함.
