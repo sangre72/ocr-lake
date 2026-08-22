@@ -16,7 +16,7 @@ DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "ocr_lake.db"
 Source = Literal["telegram", "web"]
 Route = Literal[
     "document", "photo", "ambiguous_ocr", "ambiguous_photo",
-    "pdf_document", "video_frames", "pptx_slides", "hwp_document",
+    "pdf_document", "video_frames", "pptx_slides", "hwp_document", "docx_document",
 ]
 
 _SCHEMA = """
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS ocr_records (
     image_path TEXT,
     route TEXT NOT NULL CHECK (route IN (
         'document', 'photo', 'ambiguous_ocr', 'ambiguous_photo',
-        'pdf_document', 'video_frames', 'pptx_slides', 'hwp_document'
+        'pdf_document', 'video_frames', 'pptx_slides', 'hwp_document', 'docx_document'
     )),
     extracted_text TEXT,
     description TEXT,

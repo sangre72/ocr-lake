@@ -86,7 +86,9 @@ async def structure_text(raw_text: str, doc_type: str = "auto") -> dict:
 
     Args:
         raw_text: extract_text() 로 얻은 원본 텍스트
-        doc_type: "receipt" | "card" | "auto" 등 문서 유형 힌트
+        doc_type: "receipt" | "card" | "auto" 등 문서 유형 힌트.
+            "auto" 로 호출되면 core.ocr.doc_type_detector.detect_doc_type() 으로 실제 유형을
+            먼저 판별해 자동 라우팅한다(3차 분류 — docs/tech-spec.md 분류 체계 §12-1 참고).
 
     Returns:
         구조화된 필드 dict
@@ -96,6 +98,14 @@ async def structure_text(raw_text: str, doc_type: str = "auto") -> dict:
     """
     if not raw_text or not raw_text.strip():
         raise StructurerNotConfiguredError("구조화할 텍스트가 비어 있습니다.")
+
+    if doc_type == "auto":
+        from core.ocr.doc_type_detector import detect_doc_type
+
+        detected = detect_doc_type(raw_text)
+        if detected != "auto":
+            logger.debug("doc_type auto → 감지된 유형으로 라우팅: %s", detected)
+        doc_type = detected
 
     from mlx_lm import generate
 

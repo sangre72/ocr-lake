@@ -285,6 +285,34 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 - `pipeline.process_image`의 `photo`/`ambiguous_photo` 경로가 `image_describe()`를 호출하지만 스텁이라
   항상 `note`(미구현 안내 메시지)로 폴백 — **실제 이미지 설명 기능은 아직 사용자에게 제공되지 않음**.
 
+> ⚠ 위 표는 초기 스텁 시점 기준 서술이다. 이후 로드맵 §14-1이 진행되어 `core/ocr/structurer.py`는
+> 로컬 MLX 모델(`mlx-community/Qwen2.5-7B-Instruct-4bit`)로 실제 구현 완료된 상태다(§12-1 참고).
+> `core/vision/describer.py`(이미지 설명)는 여전히 스텁 상태를 유지 중.
+
+### 12-1. 문서 분류 체계 (3단계) `구현됨`
+
+유저 질문("분류는 디테일한 분류 방식은 어떻게 처리했나?")에 답하기 위해, ocr-lake의 분류가 실제로는
+**독립적인 3단계 레이어**로 이뤄져 있음을 정리한다.
+
+| 단계 | 무엇을 가르는가 | 담당 모듈 | 값 |
+|---|---|---|---|
+| **1차 — 이미지 유형 게이트** | 이 이미지가 텍스트 문서인가 사물 사진인가 | `core/classify/engine.py`(`classify_image`, §2 참고) | `document` / `photo` / `ambiguous` |
+| **2차 — 파일 포맷 분류** | 어떤 형식의 파일이었는가(이미지/PDF/동영상/오피스 문서) | `core/pipeline.py` + 각 포맷 엔진(`core/pdf`, `core/video`, `core/pptx`, `core/hwp`, `core/docx`) | `ocr_records.route` 컬럼 값(§7 스키마 — `document`/`ambiguous_ocr`/`pdf_document`/`video_frames`/`pptx_slides`/`hwp_document`/`docx_document` 등) |
+| **3차 — 문서 내용유형 분류**(신규) | 문서 내용이 영수증인가 명함인가 일반 문서인가 | `core/ocr/doc_type_detector.py`(`detect_doc_type`) | `receipt` / `card` / `auto` |
+
+**3차 분류(신규) 동작 방식**:
+- **1단계 — 키워드 휴리스틱(비용 없음)**: "영수증"/"합계"/"총액"/"결제" 등 키워드 포함 → `receipt`.
+  전화번호 패턴 + (이메일 패턴 또는 직함 키워드) 동시 검출 → `card`.
+- **2단계 — MLX 폴백(키워드로 확신 안 설 때만)**: `core/ocr/structurer.py`가 이미 로드해둔 MLX 모델
+  전역 캐시를 그대로 재사용해 "영수증/명함/일반문서 중 무엇인가"를 짧게 질의(최대 8 토큰 응답,
+  모델 재로드 없음 — network/compute-budget 절감).
+- `structure_text(raw_text, doc_type="auto")`가 호출되면 내부적으로 `detect_doc_type()`을 먼저 실행해
+  실제 판별 결과(`receipt`/`card`/`auto`)로 자동 라우팅한다 — 기존에는 `doc_type="auto"`가 그냥 일반
+  프롬프트 스키마를 썼지만, 이제 실제 문서유형을 판별해 그에 맞는 스키마(§14-1의 영수증/명함 스키마)를
+  자동으로 선택한다.
+- **과설계 방지 원칙 준수**: 완벽한 분류기가 목표가 아니라 `structure_text`의 자동 라우팅 정확도를
+  올리는 가벼운 보조 판별기다. 계약서 등 추가 유형은 스코프 밖(필요 시 키워드/스키마만 추가하면 확장 가능).
+
 ---
 
 ## 13. 라이선스 `구현됨`

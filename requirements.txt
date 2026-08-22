@@ -10,3 +10,4 @@ opencv-python
 mlx-lm
 hwp-hwpx-parser
 python-pptx
+python-docx

@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
 
+from core.docx import UnsupportedDocxError, process_docx
 from core.hwp import UnsupportedHwpError, process_hwp
 from core.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
 from core.ocr.structurer import StructurerNotConfiguredError, structure_text
@@ -44,6 +45,9 @@ _PPTX_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 _HWP_CONTENT_TYPES = {"application/x-hwp", "application/haansofthwp", "application/vnd.hancom.hwp"}
+_DOCX_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 
 def _store_upload(raw_bytes: bytes, ext: str) -> Path:
@@ -70,6 +74,8 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
     # 확장자는 라우팅용일 뿐 신뢰 근거가 아님).
     if content_type in _HWP_CONTENT_TYPES or filename.endswith(".hwp"):
         return await _handle_hwp_upload(raw_bytes)
+    if content_type in _DOCX_CONTENT_TYPES or filename.endswith(".docx"):
+        return await _handle_docx_upload(raw_bytes)
     return await _handle_image_upload(raw_bytes)
 
 
@@ -208,6 +214,29 @@ async def _handle_hwp_upload(hwp_bytes: bytes) -> dict:
         image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
         extracted_text=result.combined_text,
         description="HWP 문서 처리",
+    )
+    return record_to_dict(get_record(record_id))
+
+
+async def _handle_docx_upload(docx_bytes: bytes) -> dict:
+    if len(docx_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="DOCX가 너무 큽니다(최대 20MB).")
+
+    try:
+        result = await process_docx(docx_bytes)
+    except UnsupportedDocxError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("웹 업로드 DOCX 처리 중 오류")
+        raise HTTPException(status_code=500, detail="DOCX 처리 중 오류가 발생했습니다.") from exc
+
+    stored_path = _store_upload(docx_bytes, ".docx")
+    record_id = save_record(
+        source="web",
+        route="docx_document",
+        image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
+        extracted_text=result.combined_text,
+        description=f"DOCX {result.paragraph_count}개 단락/행 처리",
     )
     return record_to_dict(get_record(record_id))
 
