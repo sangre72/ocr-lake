@@ -14,3 +14,4 @@ python-docx
 discord.py
 slack_sdk
 slack_bolt
+psycopg
