@@ -424,28 +424,29 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 - storage 스키마의 `source` CHECK 제약을 `discord`·`slack` 포함하도록 확장(기존 DB는 `init_db()` 가
   자동 마이그레이션 — 테이블 재생성 방식, 기존 레코드 보존 확인됨).
 
-### 14-4. 멀티 클라우드 OCR 프로바이더 연동(AWS·Microsoft·Naver·Google) `계획`
-- 현재는 Tesseract(로컬 오픈소스) 단일 엔진만 연동돼 있다(§3). 유저 요청으로 다음 4개 클라우드 OCR API 연동을
-  로드맵에 추가한다 — 비교 근거는 이미 작성된 `docs/research/ocr-technology-trends.md` 참고(중복 리서치 불필요):
+### 14-4. 멀티 클라우드 OCR 프로바이더 연동(AWS·Microsoft·Naver·Google) `일부 구현됨`
+- **구현됨**: `core/ocr/provider_base.py`(OcrProvider Protocol, `core/storage/base.py` 의 StorageProvider
+  패턴과 동일 구조) + `core/ocr/providers/tesseract_provider.py`(기존 `core/ocr/engine.py` 를
+  behavior-preserving 하게 감싼 기본 구현체) + `core/ocr/providers/google_provider.py`(Google Cloud
+  Vision — 코드는 완성, 이 레포 `.env` 에 자격증명이 없어 실제 API 호출은 미검증. 자격증명 없으면
+  `GoogleVisionCredentialsError` 로 명확히 실패).
+- **자격증명 실측 확인(2026-08-22)**: 이 레포의 `.env`/`.env.local`/`telegram_bot/orchestrator/.env`
+  어디에도 AWS/GCP/Azure/Naver Cloud 자격증명이 없음(실측 grep 확인). Google Cloud Vision을 1순위로
+  선정한 이유: API가 서비스계정 키 1개로 단순하고 무료 티어가 있음(`docs/research/ocr-technology-trends.md`
+  비교 참고).
   - **AWS Textract**: 표/폼/키-값 구조화 추출에 강함. 복잡 문서(영수증·송장) 정확도 높음.
   - **Microsoft Azure Document Intelligence**(구 Form Recognizer): 사전학습 영수증/명함/송장 모델 제공,
     2026 벤치마크 기준 정확도 상위권.
   - **Naver CLOVA OCR**: 한국어·영수증/사업자등록증 등 국내 도메인 특화 모델, 한글 필기체 지원.
-  - **Google Cloud Vision API**: 순수 텍스트 추출 속도 최상위, 비용 경쟁력.
-- **설계 방향(제안, 미착수)**:
-  1. `core/ocr/` 아래 provider 인터페이스 추상화(예: `OcrProvider` 프로토콜 — `extract_text(bytes, lang) -> str`
-     또는 confidence 포함 구조화 반환) — 지금의 Tesseract 단일 함수 호출부(`core/ocr/engine.py`)를
-     provider 중 하나로 승격, 나머지 클라우드 provider를 같은 인터페이스로 추가.
-  2. **폴백 트리거**: `core/classify/engine.py`의 저신뢰도 판정(ambiguous/photo)에서 Tesseract 결과가
-     불충분할 때, 설정된 클라우드 provider로 재시도하는 옵션(§파이프라인 확장, `core/pipeline.py`
-     `_describe_or_note`류 분기에 준하는 방식).
-  3. **자격증명 관리**: 각 클라우드 API 키(AWS/Azure/Naver/Google)는 `.env`에 provider별 키로 저장,
-     설정 안 된 provider는 자동 비활성(현재 `structurer.py`/`describer.py`의 "미설정 시 스텁 에러" 패턴과 동일).
-     사용자가 선택적으로 어떤 provider를 활성화할지 설정 가능하게.
-  4. **비용 고려**: 클라우드 API는 건당 과금이므로, Tesseract로 충분한 케이스(고신뢰도 document)는 클라우드
-     호출을 건너뛰어 비용 최소화(§계층형 파이프라인 아이디어, 오케스트레이터가 초기 설계 논의에서 제안한
-     "confidence 기반 3단계 분기"와 일치하는 방향).
-- 일정·우선순위 미정 — 착수 전.
+- **미구현(인터페이스 설계만, 코드 없음 — SDK 미설치, network-budget.md 준수)**: AWS/Azure/Naver
+  provider는 이번 작업에서 만들지 않았다(과설계 방지 — 자격증명 없는 provider를 3개나 동시에 만드는 건
+  검증 불가능한 코드만 늘리는 것). 실제 자격증명이 발급되면 `core/ocr/providers/{aws,azure,naver}_provider.py`
+  를 `google_provider.py`와 같은 패턴(Protocol 구현 + 자격증명 없으면 명확한 에러)으로 추가하면 된다.
+- **폴백 트리거(다음 단계, 이번엔 미착수)**: `core/classify/engine.py`의 저신뢰도 판정(ambiguous/photo)에서
+  Tesseract 결과가 불충분할 때 설정된 클라우드 provider로 재시도하는 옵션 — provider 등록은 됐으니 다음
+  작업에서 연결 가능.
+- **비용 고려**: 클라우드 API는 건당 과금이므로, Tesseract로 충분한 케이스(고신뢰도 document)는 클라우드
+  호출을 건너뛰어 비용 최소화하는 방향으로 향후 폴백 로직을 설계할 것.
 
 ### 14-5. PDF 내부 임베디드 이미지(XObject) 개별 추출 `계획 — 스코프 명시적 제외`
 - 현재는 PDF 페이지 전체를 이미지로 렌더링하는 방식으로만 처리(§4). PDF 내부에 개별 삽입된 이미지
