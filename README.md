@@ -70,6 +70,12 @@ Discord/Slack은 봇 토큰이 아직 발급되지 않아 실제 서버 연동 �
 - [모듈 표준 준수 감사](./docs/planning/standards/module-audit-2026-08-21.md)
 - [로컬 LLM(MLX) 모델 선정 근거](./docs/planning/standards/local-model-selection.md)
 
+### 관리자 대시보드(참고용 스크린샷)
+
+`/admin`(기본 비활성 — `ADMIN_DASHBOARD_ENABLED=1` 설정 시 활성화, 일반 화면 네비게이션에는 노출되지 않음)에서 오케스트레이터 작업 큐(대기·진행중·완료·에러, 워커 식별자)를 10초 간격으로 실시간 조회할 수 있습니다.
+
+![관리자 대시보드](./docs/screenshots/admin-dashboard.png)
+
 ## 실행
 
 ```bash

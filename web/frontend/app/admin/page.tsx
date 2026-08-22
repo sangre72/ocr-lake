@@ -1,8 +1,15 @@
-import { fetchAdminJobQueue, type AdminJobEntry } from "@/lib/api";
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+import { ApiError, fetchAdminJobQueue, type AdminJobEntry, type AdminJobQueueStatus } from "@/lib/api";
 
 // design-guideline.md §7: system-internal 정보(작업 큐 현황)는 일반 사용자 화면에 노출하지 않는다.
 // 이 화면은 일반 네비게이션(layout.tsx)에서 링크되지 않으며, 직접 URL(/admin) 접근으로만 도달한다.
 // 서버가 ADMIN_DASHBOARD_ENABLED 로 라우트 자체를 비활성화할 수 있어, 백엔드가 꺼져 있으면 에러로 표시된다.
+
+// och.txt 제5원칙(5초 감시)과 같은 정신이되, 대시보드는 사람이 보는 화면이라 서버 부담을 고려해 10초로 설정.
+const POLL_INTERVAL_MS = 10_000;
 
 function Section({ title, entries, emptyLabel }: { title: string; entries: AdminJobEntry[]; emptyLabel: string }) {
   return (
@@ -20,7 +27,8 @@ function Section({ title, entries, emptyLabel }: { title: string; entries: Admin
               <tr className="border-b border-[var(--border)] text-sm text-[var(--muted)]">
                 <th scope="col" className="py-2 pr-3">SEQ</th>
                 <th scope="col" className="py-2 pr-3">제목</th>
-                <th scope="col" className="py-2">상태</th>
+                <th scope="col" className="py-2 pr-3">상태</th>
+                <th scope="col" className="py-2">WORKER</th>
               </tr>
             </thead>
             <tbody>
@@ -28,7 +36,10 @@ function Section({ title, entries, emptyLabel }: { title: string; entries: Admin
                 <tr key={e.path} className="border-b border-[var(--border)] last:border-0">
                   <td className="py-2 pr-3 align-top whitespace-nowrap text-sm">{e.seq}</td>
                   <td className="py-2 pr-3 align-top text-sm">{e.title}</td>
-                  <td className="py-2 align-top text-sm">{e.status ?? (e.assigned === false ? "미배정" : "-")}</td>
+                  <td className="py-2 pr-3 align-top text-sm">
+                    {e.status ?? (e.assigned === false ? "미배정" : "-")}
+                  </td>
+                  <td className="py-2 align-top text-sm text-[var(--muted)]">{e.worker ?? "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -39,27 +50,51 @@ function Section({ title, entries, emptyLabel }: { title: string; entries: Admin
   );
 }
 
-export default async function AdminJobsPage() {
-  let data;
-  let error: string | null = null;
-  try {
-    data = await fetchAdminJobQueue();
-  } catch (e) {
-    error = e instanceof Error ? e.message : "작업 큐 조회에 실패했습니다.";
-  }
+export default function AdminJobsPage() {
+  const [data, setData] = useState<AdminJobQueueStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const result = await fetchAdminJobQueue();
+      setData(result);
+      setError(null);
+      setLastUpdated(new Date());
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "작업 큐 조회에 실패했습니다.");
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+    const timer = setInterval(reload, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [reload]);
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-extrabold">작업 큐 현황판 (관리자 전용)</h1>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h1 className="text-2xl font-extrabold">작업 큐 현황판 (관리자 전용)</h1>
+        <p role="status" aria-live="polite" className="text-sm text-[var(--muted)]">
+          {lastUpdated
+            ? `마지막 갱신: ${lastUpdated.toLocaleTimeString("ko-KR")} (10초마다 자동 갱신)`
+            : "불러오는 중…"}
+        </p>
+      </div>
       {error ? (
         <p role="alert" className="badge badge-danger">{error}</p>
+      ) : !data ? (
+        <p role="status" aria-live="polite" className="text-[var(--info)]">
+          불러오는 중…
+        </p>
       ) : (
         <>
-          <Section title="대기 중인 유저 요청" entries={data!.pendingU} emptyLabel="대기 중인 요청이 없습니다." />
-          <Section title="미배정 워커 지시" entries={data!.pendingA} emptyLabel="미배정 지시가 없습니다." />
-          <Section title="진행 중" entries={data!.inProgress} emptyLabel="진행 중인 작업이 없습니다." />
-          <Section title="최근 완료" entries={data!.doneRecent} emptyLabel="완료된 작업이 없습니다." />
-          <Section title="최근 에러" entries={data!.errorRecent} emptyLabel="에러가 없습니다." />
+          <Section title="대기 중인 유저 요청" entries={data.pendingU} emptyLabel="대기 중인 요청이 없습니다." />
+          <Section title="미배정 워커 지시" entries={data.pendingA} emptyLabel="미배정 지시가 없습니다." />
+          <Section title="진행 중" entries={data.inProgress} emptyLabel="진행 중인 작업이 없습니다." />
+          <Section title="최근 완료" entries={data.doneRecent} emptyLabel="완료된 작업이 없습니다." />
+          <Section title="최근 에러" entries={data.errorRecent} emptyLabel="에러가 없습니다." />
         </>
       )}
     </div>

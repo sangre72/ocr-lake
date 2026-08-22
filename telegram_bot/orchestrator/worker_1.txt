@@ -166,8 +166,14 @@ while true; do tick=$((tick+1)); pend=""; ni="";
 
 ### Processing procedure(MUST)
 1. Detect pending/stale `a_*.txt`.
-2. On pickup, immediately write `[STATUS] in-progress` + `[WORKER] ocrlakewalker` + heartbeat to
+2. On pickup, immediately write `[STATUS] in-progress` + `[WORKER] ocrlakewalker#{PID}` + heartbeat to
    `ar_{NN}_{topic}.txt`(prevents dup-processing, enables orch liveness-judgment).
+   ★**Instance identifier(added — admin dashboard needs to tell sessions apart)**: don't write the bare
+   `ocrlakewalker` string — append `#{PID}` of this process(e.g. `ocrlakewalker#12345`, get PID via
+   `echo $$` or `os.getpid()`). This isn't a perfect unique ID, but it's enough to tell "same session
+   continued this work" vs "a different session/fork picked it up". Keep the same `#{PID}` suffix for
+   every `ar_` write within one continuous processing session(don't regenerate per-write). Past `ar_`
+   files already written with the bare string are NOT retroactively fixed — this applies going forward only.
 3. Read directive, execute per TYPE(implement/research).
 4. Self-verify → on fail: fix+retry(loop until done).
 5. **MUST** final-report via `ar_{NN}_{topic}.txt`. No exiting w/o response.
@@ -193,10 +199,31 @@ while true; do tick=$((tick+1)); pend=""; ni="";
   ```
   [STATUS] in-progress
   [REF] a_07_....txt
-  [WORKER] ocrlakewalker
+  [WORKER] ocrlakewalker#12345
   [HEARTBEAT] HH:MM <current stage>
   [UPDATED] HH:MM
   ```
+
+#### ★`[WORKER]` field — session-distinguishable identifier(user directive 2026-08-22, admin dashboard)
+> Background: the admin queue dashboard(`/admin`, `GET /api/admin/jobs`) surfaces the `[WORKER]`
+> field so the user can tell **which session instance actually processed a job**. A fixed literal
+> string("ocrlakewalker" alone, with no session marker) makes every entry look identical — the user
+> cannot distinguish "the same session handled these consecutively" from "a different session/fork
+> picked this up after the prior one ended."
+- Write `[WORKER]` as `ocrlakewalker#{PID}` or `ocrlakewalker@{HH:MM session-start-time}` — a
+  base name plus a distinguishing suffix, not perfect uniqueness, just enough to tell sessions apart.
+  Example: `[WORKER] ocrlakewalker#42817` or `[WORKER] ocrlakewalker@03:20`.
+- Pick **one** convention per session and use it consistently for every ar_ that session writes
+  (don't mix PID and timestamp mid-session — makes cross-referencing harder).
+- Sub-agents/forks spawned by this session may append a short suffix of their own(e.g.
+  `ocrlakewalker#42817-fork1`) if it helps distinguish which fork wrote which ar_, but this is
+  optional — the top-level session identifier is the required part.
+- **Do not retroactively edit past ar_ files** that already have the plain `ocrlakewalker` literal —
+  this convention applies going forward only(behavior-preserving, no backfill).
+- This is a **self-followed convention in this role doc, not enforced by code** — the dashboard
+  simply displays whatever `[WORKER]` value is present; if it's the old fixed string, the dashboard
+  shows that as-is. Compliance depends on the worker session actually following this section.
+
 - **Bot contract**:
   - Only terminal(`done|error|blocked|needs-info|failed`) → Telegram reply + `protocol/done/` archive.
   - `in-progress` = **NEVER archived**(even w/o CHAT_ID).

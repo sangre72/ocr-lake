@@ -65,6 +65,7 @@ export interface AdminJobEntry {
   path: string;
   status?: string;
   assigned?: boolean;
+  worker?: string | null;
 }
 
 export interface AdminJobQueueStatus {
