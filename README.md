@@ -36,6 +36,11 @@ Discord/Slack은 봇 토큰이 아직 발급되지 않아 실제 서버 연동 �
 - OCR 오인식을 사람이 직접 검수·수정할 수 있다 — 원본은 그대로 보존한 채 교정본을 별도 저장하고,
   웹·텔레그램 양쪽에서 수정 가능(`PATCH /api/records/{id}`, [설계 문서](./docs/planning/ocr-error-correction-design.md)).
 
+> **2026-08-22 격리 실험**: 운영 코드·서비스를 건드리지 않는 별도 실험에서 Qwen3-VL-4B-4bit를
+> 운영 중인 Qwen2.5-VL-7B-4bit와 실측 비교한 결과, 더 작은 모델임에도 추론 속도 30~50% 빠르고 설명
+> 품질(색상·빛 방향 등 구체성)도 더 우수함을 확인했다(상세: [로컬 모델 선정 근거](./docs/planning/standards/local-model-selection.md),
+> [기술 스펙 §12](./docs/tech-spec.md#12-ai-구조화비전--스텁-상태-미구현)). 실제 교체는 아직 미승인 상태.
+
 **단점 / 한계**
 - OCR(Tesseract) 자체 정확도는 클라우드 OCR보다 낮다 — 특히 손글씨·복잡한 표는 취약. Google Cloud Vision
   provider(`core/ocr/providers/google_provider.py`)를 붙일 수 있는 구조는 마련했으나, 이 레포에 실제

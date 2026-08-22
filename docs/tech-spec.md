@@ -15,7 +15,7 @@
 9. [웹 API](#9-웹-apifastapi-구현됨)
 10. [웹 프론트(Next.js)](#10-웹-프론트nextjs-구현됨)
 11. [오케스트레이터 인프라](#11-오케스트레이터-인프라-구현됨)
-12. [AI 구조화/비전 — 스텁 상태](#12-ai-구조화비전--스텁-상태-미구현)
+12. [AI 구조화/비전](#12-ai-구조화비전-구현됨)
 13. [라이선스](#13-라이선스-구현됨)
 14. [로드맵(앞으로 구현될 것)](#14-로드맵-앞으로-구현될-것)
 
@@ -346,21 +346,30 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 
 ---
 
-## 12. AI 구조화/비전 — 스텁 상태 `미구현`
+## 12. AI 구조화/비전 `구현됨`
 
 | 모듈 | 파일 | 현재 상태 |
 |---|---|---|
-| 텍스트 구조화 | `core/ocr/structurer.py` | `structure_text()` 호출 시 항상 `StructurerNotConfiguredError` 발생. AI 모델(Claude/GPT) 미연동. |
-| 이미지 설명 | `core/vision/describer.py` | `image_describe()` 호출 시 항상 `DescriberNotConfiguredError` 발생. 비전 모델 미연동. |
+| 텍스트 구조화 | `core/ocr/structurer.py` | 로컬 MLX(`mlx-community/Qwen2.5-7B-Instruct-4bit`)로 실제 구현 완료. 영수증/명함/일반문서 유형별 JSON 스키마 추출. `POST /api/records/{id}/structure` 로 온디맨드 호출. |
+| 이미지 설명 | `core/vision/describer.py` | 로컬 MLX 비전-언어 모델(`mlx-vlm` + `mlx-community/Qwen2.5-VL-7B-Instruct-4bit`)로 실제 구현 완료. 실제 비전 모델(텍스트 전용 모델 오용 아님). 6종 이상 이미지 실측 검증(5/6 정확, 사인/서명류는 약점으로 확인). |
 
-- 두 스텁 모두 "모델 결정되면 이 모듈 안에서 SDK 호출부만 구현하면 되고, 호출부(pipeline/handlers)는
-  변경 불요"하도록 인터페이스가 이미 고정되어 있음(코드 주석 확인).
-- `pipeline.process_image`의 `photo`/`ambiguous_photo` 경로가 `image_describe()`를 호출하지만 스텁이라
-  항상 `note`(미구현 안내 메시지)로 폴백 — **실제 이미지 설명 기능은 아직 사용자에게 제공되지 않음**.
+- `DescriberNotConfiguredError`/`StructurerNotConfiguredError` 클래스명은 유지되나, 이제 **모델 로드·추론
+  실패 시에만** 발생하는 예외로 의미가 바뀌었다(정상 상황에서는 항상 실제 결과 반환).
+- `pipeline.process_image`의 `photo`/`ambiguous_photo` 경로가 `image_describe()`를 호출해 실제 설명을
+  `description` 필드에 채운다(텔레그램·웹 응답 양쪽에서 확인됨).
 
-> ⚠ 위 표는 초기 스텁 시점 기준 서술이다. 이후 로드맵 §14-1이 진행되어 `core/ocr/structurer.py`는
-> 로컬 MLX 모델(`mlx-community/Qwen2.5-7B-Instruct-4bit`)로 실제 구현 완료된 상태다(§12-1 참고).
-> `core/vision/describer.py`(이미지 설명)는 여전히 스텁 상태를 유지 중.
+### 12-A. Qwen3-VL 격리 실험 (2026-08-22, 미채택 — 오케 확인 대기)
+
+> och.txt §10-D(모델 실험 격리 원칙) 준수 — 운영 코드·서비스를 건드리지 않는 별도 스크립트에서 실행.
+
+- **비교**: 운영 중인 `Qwen2.5-VL-7B-Instruct-4bit` vs `mlx-community/Qwen3-VL-4B-Instruct-4bit`(2025년
+  9~10월 출시, 현재 최신 세대).
+- **실측 결과**: 더 작은 모델(4B < 7B)임에도 동일 4bit 양자화 기준 추론 속도 30~50% 빠르고, 설명 품질
+  (색상·빛의 방향·눈 덮임 등 구체성)이 더 우수함을 확인(원문 비교는
+  [로컬 모델 선정 근거 문서](./planning/standards/local-model-selection.md) 참고). 메모리 사용량은
+  비슷(6.15GB vs 6.72GB).
+- **상태**: 실험 완료, 모델은 이미 로컬 캐시에 존재(재다운로드 불요). **실제 운영 코드 교체는 아직
+  미승인** — 교체 여부는 별도 결정 대기 중.
 
 ### 12-1. 문서 분류 체계 (3단계) `구현됨`
 
@@ -419,10 +428,9 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
   유형별 스키마 추출. 문서유형은 `core/ocr/doc_type_detector.py`(키워드 휴리스틱→MLX 폴백)가 자동 판별.
   웹 API `POST /api/records/{id}/structure` 로 온디맨드 호출 가능.
 
-### 14-2. 이미지 설명(비전 모델) `계획`
-- `core/vision/describer.py` 구현 — 손글씨/사인/사물 사진 등 OCR로 커버 안 되는 케이스를 비전 모델로 설명.
-- classify_image의 저신뢰도 판정(photo/ambiguous)이 이 경로로 자연스럽게 폴백하도록 이미 설계되어 있어,
-  모델만 붙이면 별도 라우팅 로직 변경 없이 활성화 가능(현재 검증된 구조).
+### 14-2. 이미지 설명(비전 모델) `구현됨`
+- `core/vision/describer.py` — `mlx-vlm` + `mlx-community/Qwen2.5-VL-7B-Instruct-4bit`로 구현 완료(§12 참고).
+- Qwen3-VL-4B 로 교체 시 속도·품질 개선 여지 확인됨(§12-A 격리 실험 참고, 미채택).
 
 ### 14-3. 채널 확장(Discord/Slack) `구현됨(코드 완성) — 실 서버 연동은 유저 액션 필요`
 - `discord_bot/`(discord.py), `slack_bot/`(slack_bolt) 신설. 둘 다 telegram_bot/handlers 와 동일하게
