@@ -382,6 +382,20 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 
 > 아래 항목은 전부 `계획` — 착수 전이거나 스텁 상태. 일정·모델 확정 없음.
 
+### 14-0. RAG(검색증강생성) — 시도했으나 보류 `계획 — 접근법 재검토 필요`
+- 텔레그램 우선으로 로컬 MLX 스택 확장 시도(임베딩: 텍스트생성 모델 Qwen2.5-7B의 hidden state를
+  mean-pooling + 랜덤 프로젝션으로 768차원 축소).
+- **실측 결과 폐기(2026-08-22)**: 의미상 동일한 텍스트(같은 영수증의 영어판/한글판)의 코사인 유사도가
+  무관한 텍스트와의 유사도보다 낮게 나오는 역전 현상 확인 — 실제 유사도 검색에 부적합.
+- 원인: 생성 전용 LLM의 hidden state는 임베딩 전용 모델과 학습 목표가 달라 의미 유사도를 안정적으로
+  보존하지 않음(mean-pooling 특유의 anisotropy 문제).
+- `mlx-embeddings`(전용 임베딩 패키지) 시도했으나 설치 시 시스템 전역 `transformers`를 5.x로 강제
+  업그레이드해 다른 프로젝트(transformers==4.57.3 요구)를 깨뜨리는 의존성 충돌 발견 → 폐기.
+- **후속 시 고려사항**: (a) `transformers` 버전 충돌을 우회하는 격리 환경(venv 등)에서 mlx-embeddings
+  재시도, (b) 또는 sentence-transformers 계열의 검증된 임베딩 전용 모델 다른 경량 대안 탐색, (c) 클라우드
+  임베딩 API(OpenAI/Cohere 등)를 선택적으로 붙이는 옵션도 검토 가능.
+- pgvector 컬럼(`ocr_records.embedding vector(768)`)은 스키마만 유지, 실제 값은 채우지 않음(항상 NULL).
+
 ### 14-1. AI 구조화 파싱 `계획`
 - `core/ocr/structurer.py` 구현 — 영수증/명함 등 문서유형별 스키마 추출(예: 금액·날짜·상호명 필드화).
 - 사용 모델(Claude/GPT 등) 미정. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` 설정 후 착수 예정(코드 주석 근거).
