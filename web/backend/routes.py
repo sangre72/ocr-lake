@@ -14,9 +14,10 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
 
 from core.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
+from core.ocr.structurer import StructurerNotConfiguredError, structure_text
 from core.pdf import UnsupportedPdfError, process_pdf
 from core.pipeline import process_image
-from core.storage import get_record, list_records, record_to_dict, save_record
+from core.storage import get_record, list_records, record_to_dict, save_record, update_structured_json
 from core.video import UnsupportedVideoError, process_video
 
 logger = logging.getLogger(__name__)
@@ -162,3 +163,27 @@ async def get_record_detail(record_id: int) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
     return record_to_dict(record)
+
+
+@router.post("/records/{record_id}/structure")
+async def structure_record(record_id: int, doc_type: str = "auto") -> dict:
+    """저장된 이력의 추출 텍스트를 로컬 LLM(MLX)으로 구조화하고 structured_json 컬럼에 저장한다.
+
+    온디맨드 방식(업로드 시 자동 구조화 대신 필요할 때 호출) — MLX 모델 추론 시간을 고려한 선택.
+    """
+    record = get_record(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
+    if not record.extracted_text:
+        raise HTTPException(status_code=400, detail="구조화할 텍스트가 없는 레코드입니다.")
+
+    try:
+        structured = await structure_text(record.extracted_text, doc_type=doc_type)
+    except StructurerNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("웹 구조화 처리 중 오류")
+        raise HTTPException(status_code=500, detail="구조화 처리 중 오류가 발생했습니다.") from exc
+
+    update_structured_json(record_id, structured)
+    return record_to_dict(get_record(record_id))

@@ -7,3 +7,4 @@ uvicorn
 python-multipart
 pdf2image
 opencv-python
+mlx-lm

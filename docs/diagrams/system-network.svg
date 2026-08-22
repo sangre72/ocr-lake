@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" font-family="'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+    </marker>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbf8f3"/>
+      <stop offset="1" stop-color="#f4efe6"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="560" fill="url(#bg2)"/>
+  <text x="490" y="38" text-anchor="middle" font-size="22" font-weight="700" fill="#3f2d1c">ocr-lake 시스템 구성 · 네트워크 연결도</text>
+
+  <!-- External: Telegram API -->
+  <rect x="40" y="70" width="220" height="70" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="150" y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#1e40af">Telegram Bot API</text>
+  <text x="150" y="120" text-anchor="middle" font-size="11" fill="#3355a8">(외부, api.telegram.org)</text>
+
+  <!-- Browser -->
+  <rect x="720" y="70" width="220" height="70" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="830" y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#1e40af">사용자 브라우저</text>
+  <text x="830" y="120" text-anchor="middle" font-size="11" fill="#3355a8">localhost:3000</text>
+
+  <!-- ocrlakebot process -->
+  <rect x="40" y="190" width="220" height="80" rx="12" fill="#ffe0b3" stroke="#d98c2b" stroke-width="2"/>
+  <text x="150" y="220" text-anchor="middle" font-size="14" font-weight="700" fill="#5c3b0f">ocrlakebot 프로세스</text>
+  <text x="150" y="240" text-anchor="middle" font-size="11" fill="#7a4f1a">telegram_bot/bot.py</text>
+  <text x="150" y="256" text-anchor="middle" font-size="11" fill="#7a4f1a">(long-polling)</text>
+
+  <!-- Next.js -->
+  <rect x="720" y="190" width="220" height="80" rx="12" fill="#ffe0b3" stroke="#d98c2b" stroke-width="2"/>
+  <text x="830" y="220" text-anchor="middle" font-size="14" font-weight="700" fill="#5c3b0f">Next.js 서버</text>
+  <text x="830" y="240" text-anchor="middle" font-size="11" fill="#7a4f1a">web/frontend, :3000</text>
+  <text x="830" y="256" text-anchor="middle" font-size="11" fill="#7a4f1a">App Router</text>
+
+  <!-- FastAPI -->
+  <rect x="380" y="190" width="220" height="80" rx="12" fill="#ffe0b3" stroke="#d98c2b" stroke-width="2"/>
+  <text x="490" y="220" text-anchor="middle" font-size="14" font-weight="700" fill="#5c3b0f">FastAPI 서버</text>
+  <text x="490" y="240" text-anchor="middle" font-size="11" fill="#7a4f1a">web/backend, :8000</text>
+  <text x="490" y="256" text-anchor="middle" font-size="11" fill="#7a4f1a">/api/upload · /api/records</text>
+
+  <!-- core -->
+  <rect x="215" y="320" width="550" height="70" rx="12" fill="#c9ecd6" stroke="#3f8f63" stroke-width="2"/>
+  <text x="490" y="350" text-anchor="middle" font-size="14" font-weight="700" fill="#134d2c">core/ (분류·OCR·PDF·동영상·MLX 구조화 — 로컬 실행)</text>
+  <text x="490" y="370" text-anchor="middle" font-size="11" fill="#2f6b48">양쪽 채널이 동일 함수 호출 — 클라우드 API 미사용(Apple Silicon 로컬 추론)</text>
+
+  <!-- SQLite -->
+  <rect x="380" y="420" width="220" height="60" rx="10" fill="#e9edf7" stroke="#7a8bc4" stroke-width="2"/>
+  <text x="490" y="445" text-anchor="middle" font-size="13" font-weight="700" fill="#33437a">SQLite 파일</text>
+  <text x="490" y="463" text-anchor="middle" font-size="11" fill="#4b5a91">data/ocr_lake.db</text>
+
+  <!-- kong-bot -->
+  <rect x="40" y="420" width="220" height="90" rx="12" fill="#f3e0d0" stroke="#c98a55" stroke-width="2" stroke-dasharray="6,4"/>
+  <text x="150" y="445" text-anchor="middle" font-size="13" font-weight="700" fill="#7a4a20">kong-bot (별도 프로세스)</text>
+  <text x="150" y="463" text-anchor="middle" font-size="11" fill="#8a5a30">~/git/kong-bot, 독립 실행</text>
+  <text x="150" y="479" text-anchor="middle" font-size="11" fill="#8a5a30">manifest.json 파일 공유</text>
+  <text x="150" y="495" text-anchor="middle" font-size="10" fill="#8a5a30">(och.txt §10-A/B, 로컬 파일 경로)</text>
+
+  <!-- arrows -->
+  <path d="M150,140 L150,185" stroke="#64748b" stroke-width="2" marker-end="url(#arrow2)"/>
+  <path d="M830,140 L830,185" stroke="#64748b" stroke-width="2" marker-end="url(#arrow2)"/>
+  <path d="M260,230 C320,230 340,225 375,225" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4,3" fill="none"/>
+  <path d="M720,225 C650,225 630,225 605,225" stroke="#64748b" stroke-width="2" marker-end="url(#arrow2)" fill="none"/>
+  <path d="M490,270 L490,315" stroke="#64748b" stroke-width="2" marker-end="url(#arrow2)"/>
+  <path d="M490,390 L490,415" stroke="#64748b" stroke-width="2" marker-end="url(#arrow2)"/>
+  <path d="M150,420 C150,400 200,400 250,375" stroke="#c98a55" stroke-width="1.5" stroke-dasharray="4,3" fill="none" marker-end="url(#arrow2)"/>
+
+  <text x="490" y="530" text-anchor="middle" font-size="11" fill="#64748b">실선 = 실시간 API/함수 호출 · 점선 = 로컬 파일 공유(폴링/수동 실행)</text>
+</svg>

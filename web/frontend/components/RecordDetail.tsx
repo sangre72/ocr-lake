@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { fetchRecord } from "@/lib/api";
+import { ApiError, fetchRecord, structureRecord } from "@/lib/api";
 import { ROUTE_BADGE_CLASS, ROUTE_LABEL, isTextRoute } from "@/lib/route-label";
 import type { OcrRecord } from "@/lib/types";
 
@@ -11,6 +11,23 @@ export default function RecordDetail({ id }: { id: number }) {
   const [record, setRecord] = useState<OcrRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [structuring, setStructuring] = useState(false);
+  const [structureError, setStructureError] = useState<string | null>(null);
+
+  const handleStructure = async () => {
+    setStructuring(true);
+    setStructureError(null);
+    try {
+      const updated = await structureRecord(id);
+      setRecord(updated);
+    } catch (err) {
+      setStructureError(
+        err instanceof ApiError ? err.message : "구조화 처리 중 오류가 발생했습니다."
+      );
+    } finally {
+      setStructuring(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -53,9 +70,45 @@ export default function RecordDetail({ id }: { id: number }) {
             <span className="text-sm text-[var(--muted)]">{record.createdAt}</span>
           </div>
           {isTextRoute(record.route) ? (
-            <pre className="whitespace-pre-wrap break-words text-sm bg-[var(--background)] border border-[var(--border)] rounded-[var(--radius-md)] p-3">
-              {record.extractedText || "추출된 텍스트가 없습니다."}
-            </pre>
+            <>
+              <pre className="whitespace-pre-wrap break-words text-sm bg-[var(--background)] border border-[var(--border)] rounded-[var(--radius-md)] p-3">
+                {record.extractedText || "추출된 텍스트가 없습니다."}
+              </pre>
+
+              {record.extractedText && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleStructure}
+                    disabled={structuring}
+                  >
+                    {structuring ? "구조화 중…" : "AI로 구조화하기"}
+                  </button>
+
+                  {structuring && (
+                    <p role="status" aria-live="polite" className="mt-2 text-sm text-[var(--info)]">
+                      로컬 모델로 텍스트를 구조화하고 있습니다…
+                    </p>
+                  )}
+
+                  {structureError && (
+                    <p role="alert" aria-live="assertive" className="mt-2 badge badge-danger">
+                      {structureError}
+                    </p>
+                  )}
+
+                  {record.structuredJson && (
+                    <pre
+                      className="mt-3 whitespace-pre-wrap break-words text-sm bg-[var(--background)] border border-[var(--border)] rounded-[var(--radius-md)] p-3"
+                      aria-live="polite"
+                    >
+                      {JSON.stringify(record.structuredJson, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             <p className="text-sm text-[var(--muted)]">
               사진으로 인식했습니다 — 설명 기능은 준비 중입니다.

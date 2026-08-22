@@ -100,6 +100,15 @@ def save_record(
         return cur.lastrowid
 
 
+def update_structured_json(record_id: int, structured_json: dict) -> None:
+    """기존 레코드의 structured_json 컬럼을 갱신한다(온디맨드 AI 구조화 결과 저장)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE ocr_records SET structured_json = ? WHERE id = ?",
+            (json.dumps(structured_json, ensure_ascii=False), record_id),
+        )
+
+
 def _row_to_record(row: sqlite3.Row) -> OcrRecord:
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
     return OcrRecord(

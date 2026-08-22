@@ -53,6 +53,14 @@ web/                   웹 채널
   `web/backend/*.py`는 `from core.xxx import`를 사용하며 옛 `from telegram_bot.{ocr,classify,pdf,video,vision,storage}`
   경로 참조는 0건(2026-08-22 grep 확인).
 
+### 소프트웨어 아키텍처 다이어그램
+
+![소프트웨어 아키텍처](diagrams/software-architecture.svg)
+
+### 시스템 구성 · 네트워크 연결도
+
+![시스템 구성도](diagrams/system-network.svg)
+
 ---
 
 ## 2. 이미지 유형 분류 게이트 `구현됨`

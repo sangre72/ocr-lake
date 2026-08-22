@@ -48,3 +48,13 @@ export async function fetchRecord(id: number): Promise<OcrRecord> {
   });
   return parseJsonOrThrow(res);
 }
+
+export async function structureRecord(
+  id: number,
+  docType: "auto" | "receipt" | "card" = "auto"
+): Promise<OcrRecord> {
+  const res = await fetch(`${API_BASE}/api/records/${id}/structure?doc_type=${docType}`, {
+    method: "POST",
+  });
+  return parseJsonOrThrow(res);
+}
