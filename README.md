@@ -90,6 +90,45 @@ python3 -m uvicorn web.backend.main:app --reload --port 8000
 cd web/frontend && npm install && npm run dev
 ```
 
+## 네트워크 구성 · 방화벽
+
+실측(코드 grep) 기반 — 각 채널이 실제로 어느 방향으로 통신하는지 정리한다. 로컬/신뢰 환경(단일
+사용자, 같은 머신) 전제이며, 별도 인증 계층은 아직 없다(security-guideline.md §17 참고).
+
+### 서비스별 포트
+
+| 서비스 | 포트 | 방향 | 비고 |
+|---|---|---|---|
+| Next.js 프론트(`web/frontend`) | 3000(기본), 자동 대체 3001 | inbound(로컬) | 브라우저 → 프론트 |
+| FastAPI 백엔드(`web/backend`) | 8000 | inbound(로컬) | 프론트/curl → 백엔드. CORS로 3000·3001만 허용 |
+| PostgreSQL(`STORAGE_PROVIDER=postgres`) | 5432 | inbound(로컬) | 백엔드/텔레그램 프로세스 → DB, 같은 머신 기준 |
+| Slack Bolt(`slack_bot`, HTTP 모드) | 3010(기본, `SLACK_PORT`) | **inbound(외부)** | Slack 서버가 이벤트를 이 포트로 push — 로컬 개발 시 ngrok 등 터널 필요(`.env.example` 주석 참고) |
+| Ollama(로컬 LLM, 참고용) | 11434 | inbound(로컬) | 이 프로젝트는 MLX(프로세스 내 추론)를 쓰므로 미사용 — 과거 검토 흔적만 존재 |
+
+### 아웃바운드(이 서버 → 외부)
+
+| 대상 | 포트/프로토콜 | 용도 |
+|---|---|---|
+| `api.telegram.org` | 443(HTTPS), long-polling | 텔레그램 봇 메시지 수신·응답(`telegram_bot/bot.py` — `run_polling`, inbound 포트 개방 불요) |
+| Discord Gateway(`discord.com`) | 443(HTTPS)+WSS | Discord 봇 이벤트 수신(`discord_bot/bot.py` — `client.run()`, 웹소켓 아웃바운드 연결이라 inbound 포트 개방 불요) |
+| `vision.googleapis.com` | 443(HTTPS) | Google Cloud Vision REST API 호출(자격증명 설정 시에만, `core/ocr/providers/google_provider.py`) |
+| HuggingFace Hub(최초 1회) | 443(HTTPS) | MLX 모델 최초 다운로드 시에만(로컬 캐시 이후 오프라인 추론) |
+
+### 인바운드(외부 → 이 서버)
+
+| 발신처 | 포트 | 용도 |
+|---|---|---|
+| Slack 서버 | 3010(`SLACK_PORT`) | Slack 이벤트(`file_shared` 등) 웹훅 수신 — **활성화 시에만** 방화벽에서 열어야 함(로컬 개발은 ngrok 등으로 우회 가능) |
+| (사용자 자신) 브라우저 | 3000/3001, 8000 | 로컬 웹 UI·API 접근 — 외부 공개 배포 시에만 방화벽 개방 검토 |
+
+### 요약
+
+- **텔레그램·Discord**: 아웃바운드 연결만 사용 — 방화벽에서 별도 inbound 포트를 열 필요 없음.
+- **Slack**: 유일하게 inbound 포트(3010)가 필요한 채널 — 실 배포 시 리버스 프록시/방화벽 규칙 필요.
+- **웹(Next.js+FastAPI)·PostgreSQL**: 같은 머신 내 로컬 통신 전제 — 외부 공개하려면 8000·5432를 별도로
+  보호(리버스 프록시·방화벽 화이트리스트)해야 한다(현재 CORS만으로는 네트워크 레벨 차단이 아님).
+- 상세 다이어그램: [`docs/diagrams/system-network.svg`](./docs/diagrams/system-network.svg)
+
 ## License
 
 This project is distributed under the [PolyForm Noncommercial License 1.0.0](./LICENSE).

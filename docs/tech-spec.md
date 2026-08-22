@@ -61,6 +61,24 @@ web/                   웹 채널
 
 ![시스템 구성도](diagrams/system-network.svg)
 
+#### 포트 · 방화벽(inbound/outbound) `구현됨`
+
+실측(코드 grep) 기반. 상세는 [`README.md#네트워크-구성-방화벽`](../README.md#네트워크-구성--방화벽) 참고.
+
+| 서비스 | 포트 | 방향 | 근거 |
+|---|---|---|---|
+| Next.js 프론트 | 3000/3001 | inbound(로컬) | `web/frontend`, Next.js 기본값+자동 대체 포트 |
+| FastAPI 백엔드 | 8000 | inbound(로컬) | `web/backend/main.py` CORS 화이트리스트가 3000/3001만 허용 |
+| PostgreSQL | 5432 | inbound(로컬) | `core/storage/postgres_provider.py` 기본 `POSTGRES_PORT` |
+| Slack Bolt(HTTP 모드) | 3010 | **inbound(외부)** | `slack_bot/bot.py` `app.start(port=...)` — Slack 서버가 이벤트를 push하는 유일한 외부 inbound 경로 |
+| 텔레그램 봇 | — | outbound만 | `telegram_bot/bot.py` `run_polling()` — long-polling, inbound 불요 |
+| Discord 봇 | — | outbound만 | `discord_bot/bot.py` `client.run()` — 웹소켓 게이트웨이 아웃바운드 연결 |
+| Google Cloud Vision | 443(HTTPS) | outbound | `core/ocr/providers/google_provider.py`, 자격증명 설정 시에만 |
+
+★핵심: 텔레그램·Discord는 아웃바운드 전용이라 방화벽에 inbound 규칙이 불요하다. **Slack만 유일하게
+inbound 포트(3010)가 필요**(HTTP 이벤트 수신 모드 채택 — Socket Mode 대신). 로컬 개발 시 ngrok 등
+터널로 우회 가능.
+
 ---
 
 ## 2. 이미지 유형 분류 게이트 `구현됨`
