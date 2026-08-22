@@ -176,6 +176,21 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 - 인덱스: `idx_ocr_records_created_at`(`created_at DESC`).
 - API/프론트 응답 시 `record_to_dict()`가 스네이크케이스 → camelCase 변환(naming-standard.md).
 
+### 저장소 Provider 추상화 `구현됨`
+
+- `core/storage/base.py`: `StorageProvider` Protocol(`init`·`save_record`·`update_structured_json`·
+  `list_records`·`get_record`) — 향후 다른 저장소를 붙일 때 이 인터페이스만 구현하면 된다.
+- `core/storage/sqlite_provider.py`: `SqliteProvider` — 기존 `db.py` 함수형 API를 그대로 위임하는 얇은 어댑터
+  (behavior-preserving, 기존 `web/backend`·`telegram_bot/handlers` 호출부는 변경 없음).
+- `core/storage/__init__.py`의 `get_storage_provider()`가 `STORAGE_PROVIDER` 환경변수(기본값 `sqlite`)로
+  provider를 선택하는 팩토리.
+
+**향후 지원 예정(계획 — 코드 없음, `StorageProvider` 인터페이스만 구현하면 연결 가능)**:
+- **PostgreSQL 등 RDB**: 대용량 동시 접속·트랜잭션이 필요해지면.
+- **Elasticsearch(ELK)**: 추출 텍스트 전문(全文) 검색이 필요해지면.
+- **Hadoop(HDFS 등)**: 원본 파일·이력이 대용량으로 누적돼 분산 저장이 필요해지면.
+- **벡터DB(Chroma/Milvus/pgvector 등)**: 추출 텍스트를 임베딩해 의미 기반 유사 문서 검색이 필요해지면.
+
 ---
 
 ## 8. 텔레그램 봇 `구현됨`
@@ -336,10 +351,23 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 - classify_image의 저신뢰도 판정(photo/ambiguous)이 이 경로로 자연스럽게 폴백하도록 이미 설계되어 있어,
   모델만 붙이면 별도 라우팅 로직 변경 없이 활성화 가능(현재 검증된 구조).
 
-### 14-3. 채널 확장(Discord/Slack) `계획`
-- 현재 텔레그램 채널만 구현. `core/`가 채널 무관 구조로 분리되어 있어(§1) 신규 채널 어댑터 추가 시
-  `core.pipeline.process_image` 등을 그대로 재사용 가능한 구조는 마련되어 있으나, 실제 어댑터 구현은
-  아직 착수 전.
+### 14-3. 채널 확장(Discord/Slack) `구현됨(코드 완성) — 실 서버 연동은 유저 액션 필요`
+- `discord_bot/`(discord.py), `slack_bot/`(slack_bolt) 신설. 둘 다 telegram_bot/handlers 와 동일하게
+  `core.pipeline.process_image`·`core.pdf.process_pdf`·`core.video.process_video`·
+  `core.pptx.process_pptx`·`core.docx.process_docx`·`core.hwp.process_hwp` 를 그대로 재사용하는
+  얇은 어댑터로 구현했다(채널 대칭 — feature-consistency-guideline.md).
+- **검증 범위**: `DISCORD_BOT_TOKEN`·`SLACK_BOT_TOKEN`이 아직 발급되지 않아(`.env` 미설정) 실제
+  Discord 서버·Slack 워크스페이스에 붙여 라이브 테스트는 하지 못했다. 대신 유닛 테스트 레벨로 검증함:
+  - `discord_bot/handlers.py`·`slack_bot/handlers.py` 의 라우팅 함수를 실제 파일 바이트(이미지·PPTX·PDF)로
+    직접 호출해 core 파이프라인이 정상 실행됨을 확인.
+  - 두 봇 엔트리(`discord_bot/bot.py`, `slack_bot/bot.py`) 모두 토큰 없이 모듈 임포트만으로는 에러가
+    나지 않음을 확인(토큰 검증은 `main()`/`load_config()` 호출 시점으로 늦춰 설계).
+- **실제 사용하려면**: Discord Developer Portal에서 봇 생성 후 `DISCORD_BOT_TOKEN` 발급(Message Content
+  Intent 활성화 필수) + Slack API 앱 생성 후 `SLACK_BOT_TOKEN`·`SLACK_SIGNING_SECRET` 발급(file_shared
+  이벤트 구독 필요) → `.env`에 채우면 `python3 -m discord_bot.bot` / `python3 -m slack_bot.bot` 으로
+  바로 동작(`.env.example` 에 발급 절차 주석으로 안내됨).
+- storage 스키마의 `source` CHECK 제약을 `discord`·`slack` 포함하도록 확장(기존 DB는 `init_db()` 가
+  자동 마이그레이션 — 테이블 재생성 방식, 기존 레코드 보존 확인됨).
 
 ### 14-4. 멀티 클라우드 OCR 프로바이더 연동(AWS·Microsoft·Naver·Google) `계획`
 - 현재는 Tesseract(로컬 오픈소스) 단일 엔진만 연동돼 있다(§3). 유저 요청으로 다음 4개 클라우드 OCR API 연동을
