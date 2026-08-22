@@ -165,9 +165,9 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 |---|---|---|---|
 | `id` | INTEGER | PK AUTOINCREMENT | |
 | `created_at` | TEXT | NOT NULL, DEFAULT now | |
-| `source` | TEXT | NOT NULL, CHECK IN ('telegram','web') | 어느 채널에서 처리됐는지 |
+| `source` | TEXT | NOT NULL, CHECK IN ('telegram','web','discord','slack') | 어느 채널에서 처리됐는지 |
 | `image_path` | TEXT | nullable | 저장된 원본 파일 상대경로 |
-| `route` | TEXT | NOT NULL, CHECK IN ('document','photo','ambiguous_ocr','ambiguous_photo','pdf_document','video_frames') | |
+| `route` | TEXT | NOT NULL, CHECK IN ('document','photo','ambiguous_ocr','ambiguous_photo','pdf_document','video_frames','pptx_slides','hwp_document','docx_document') | |
 | `extracted_text` | TEXT | nullable | |
 | `description` | TEXT | nullable | |
 | `structured_json` | TEXT | nullable, JSON 직렬화 | PDF 페이지별/동영상 프레임별 상세 |
@@ -181,15 +181,38 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
 - `core/storage/base.py`: `StorageProvider` Protocol(`init`·`save_record`·`update_structured_json`·
   `list_records`·`get_record`) — 향후 다른 저장소를 붙일 때 이 인터페이스만 구현하면 된다.
 - `core/storage/sqlite_provider.py`: `SqliteProvider` — 기존 `db.py` 함수형 API를 그대로 위임하는 얇은 어댑터
-  (behavior-preserving, 기존 `web/backend`·`telegram_bot/handlers` 호출부는 변경 없음).
+  (behavior-preserving).
 - `core/storage/__init__.py`의 `get_storage_provider()`가 `STORAGE_PROVIDER` 환경변수(기본값 `sqlite`)로
-  provider를 선택하는 팩토리.
+  provider를 선택하는 팩토리. ★`init_db`/`save_record`/`get_record`/`list_records`/`update_structured_json`
+  함수형 API 자체가 이 팩토리로 위임하도록 구현되어 있어, `web/backend`·`telegram_bot/handlers` 등
+  호출부 코드 변경 없이 `STORAGE_PROVIDER` 환경변수만 바꾸면 실제 저장소가 전환된다(실측 확인 —
+  `STORAGE_PROVIDER=postgres`로 웹 업로드→PostgreSQL 저장까지 재기동만으로 전환 검증됨).
+
+### PostgreSQL Provider `구현됨`
+
+- `core/storage/postgres_provider.py`: `PostgresProvider` — `psycopg`(v3)로 연결, SQLite와 동등한
+  `ocr_records` 스키마를 PostgreSQL DDL로 재현(타입만 대응: `SERIAL`/`TIMESTAMPTZ`/`JSONB`/`BIGINT`).
+- 접속 정보: `OCR_LAKE_DATABASE_URL`(우선) 또는 `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_USER`/
+  `POSTGRES_PASSWORD`/`POSTGRES_DB` 개별 변수(`.env.example` 참고). ★일반 `DATABASE_URL`이 아닌
+  `OCR_LAKE_DATABASE_URL`을 쓰는 이유: 이 레포의 `.env.example`에 다른 프로젝트(skyrecruit)용
+  `DATABASE_URL`이 이미 있어 혼동·오연결 사고를 막기 위함.
+- 이 프로젝트 전용 DB(`ocr_lake`)를 신규 생성해 사용(기존 로컬 PostgreSQL의 다른 DB는 건드리지 않음
+  — 실측: `db_test`·`menu_manager`·`myapp`·`ragdoc` 등 기존 DB 목록 확인 후 무관하게 신규 생성).
+- **pgvector 확장**(`CREATE EXTENSION IF NOT EXISTS vector`, 버전 0.8.1)을 자동 활성화하고,
+  `ocr_records.embedding vector(768)` 컬럼을 스켈레톤으로 준비해뒀다.
+  - ★스코프 경계(명시): 이번 작업은 **컬럼·테이블 스켈레톤까지만** — 실제 텍스트를 임베딩 벡터로
+    변환해 이 컬럼에 채우는 임베딩 생성 모델 연동은 하지 않았다(과설계 방지, `mlx-embeddings` 등
+    후보는 있으나 신규 모델 다운로드가 필요해 이번 스코프에서 제외). 의미기반 유사 문서 검색 기능
+    자체도 아직 없다 — 컬럼만 존재.
+- **회귀 검증**: `STORAGE_PROVIDER` 미설정(기본값) 시 SQLite로 정상 동작 유지 확인, `postgres`로 전환
+  시에도 웹 업로드·조회가 정상 동작하고 실제 PostgreSQL 테이블에 데이터가 쌓임을 `psql` 직접 조회로
+  재확인.
 
 **향후 지원 예정(계획 — 코드 없음, `StorageProvider` 인터페이스만 구현하면 연결 가능)**:
-- **PostgreSQL 등 RDB**: 대용량 동시 접속·트랜잭션이 필요해지면.
 - **Elasticsearch(ELK)**: 추출 텍스트 전문(全文) 검색이 필요해지면.
 - **Hadoop(HDFS 등)**: 원본 파일·이력이 대용량으로 누적돼 분산 저장이 필요해지면.
-- **벡터DB(Chroma/Milvus/pgvector 등)**: 추출 텍스트를 임베딩해 의미 기반 유사 문서 검색이 필요해지면.
+- **벡터 검색 파이프라인 완성**(임베딩 생성 모델 연동): 위 `embedding` 컬럼에 실제 값을 채워
+  "이 영수증과 비슷한 과거 영수증 찾기" 같은 의미기반 유사 문서 검색이 필요해지면.
 
 ---
 
@@ -285,6 +308,23 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
   - §10-B `OUTBOUND`: ocrlakebot 토큰을 kong-bot에 공유해, kong-bot이 작업 완료 시 ocrlakebot API로
     직접 결과물을 사용자에게 push하는 자동 전달 경로(수동 포워딩 대체).
   - §10-C: 라이선스 정책이 kong-bot과 동일(§13 참고).
+
+### 11-1. 작업 큐 관리 대시보드 `구현됨`
+
+> design-guideline.md §7(system-internal 노출 금지)에 따라 일반 사용자 화면과 완전히 분리된 관리자 전용
+> 기능이다. 일반 네비게이션(`web/frontend/app/layout.tsx`)에 링크가 없으며, 직접 URL로만 접근한다.
+
+- **목적**: 오케스트레이터 protocol 큐(`telegram_bot/orchestrator/protocol/`)에 쌓이는 유저 요청·워커
+  지시·응답 상태(대기·진행중·완료·에러)를 한눈에 파악.
+- **백엔드**: `GET /api/admin/jobs`(`web/backend/admin_routes.py`) — `telegram_bot/orchestrator/
+  protocol_store.py`의 기존 함수(`read_response_status`, `is_terminal_status` 등)를 재사용해 `protocol/u`,
+  `protocol/a`(+ar), `protocol/done`을 읽어 `pendingU`/`pendingA`/`inProgress`/`doneRecent`/`errorRecent`
+  로 집계(`web/backend/admin.py`).
+- **활성화 스위치**: `ADMIN_DASHBOARD_ENABLED`(기본 off) — 꺼져 있으면 라우터 자체가 등록되지 않아
+  `/api/admin/jobs`가 404. 인증 시스템이 이 프로젝트에 아직 없어 완전한 인가까지는 미달성 — 로컬/신뢰
+  환경에서만 켜서 쓸 것.
+- **프론트**: `/admin`(`web/frontend/app/admin/page.tsx`) — 상태별 섹션(대기/미배정/진행중/완료/에러)
+  테이블. 일반 화면(`/`, `/records`)에는 이 경로로의 링크가 없음(실측: `layout.tsx` grep 결과 0건).
 
 ---
 

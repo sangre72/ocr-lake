@@ -3,6 +3,8 @@
 실행: python3 -m uvicorn web.backend.main:app --port 8000
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -28,6 +30,13 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+# design-guideline.md §7: system-internal 정보는 일반 화면에 노출 금지.
+# 관리자 대시보드는 명시적으로 활성화한 경우에만 라우터 자체를 등록한다(기본 off).
+if os.environ.get("ADMIN_DASHBOARD_ENABLED", "").lower() in ("1", "true", "on", "yes"):
+    from web.backend.admin_routes import admin_router
+
+    app.include_router(admin_router)
 
 
 @app.on_event("startup")

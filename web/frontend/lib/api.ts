@@ -58,3 +58,24 @@ export async function structureRecord(
   });
   return parseJsonOrThrow(res);
 }
+
+export interface AdminJobEntry {
+  seq: string;
+  title: string;
+  path: string;
+  status?: string;
+  assigned?: boolean;
+}
+
+export interface AdminJobQueueStatus {
+  pendingU: AdminJobEntry[];
+  pendingA: AdminJobEntry[];
+  inProgress: AdminJobEntry[];
+  doneRecent: AdminJobEntry[];
+  errorRecent: AdminJobEntry[];
+}
+
+export async function fetchAdminJobQueue(): Promise<AdminJobQueueStatus> {
+  const res = await fetch(`${API_BASE}/api/admin/jobs`);
+  return parseJsonOrThrow(res);
+}
