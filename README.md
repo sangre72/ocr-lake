@@ -30,15 +30,23 @@ Discord/Slack은 봇 토큰이 아직 발급되지 않아 실제 서버 연동 �
 **장점**
 - 텔레그램·웹 두 채널이 완전히 같은 처리 로직(`core/`)을 공유해 어느 쪽으로 넣어도 결과가 동일하다.
 - OCR 없이 텍스트를 직접 뽑을 수 있는 포맷(PPTX/DOCX/HWP)은 OCR을 건너뛰어 정확도 100%·처리 비용 최소화.
-- 구조화 파싱(영수증/명함 등)이 클라우드 API가 아닌 로컬 MLX 모델이라 API 비용·외부 전송 없이 처리 가능(Apple Silicon 네이티브 가속).
+- 구조화 파싱(영수증/명함 등)·이미지 설명(손글씨·사물 사진 등) 둘 다 클라우드 API 없이 로컬 MLX
+  모델(텍스트: Qwen2.5-7B, 비전: Qwen2.5-VL-7B)로 처리해 API 비용·외부 전송이 없다(Apple Silicon 네이티브 가속).
 - 문서 유형 세분류가 키워드 휴리스틱 우선이라 대부분의 경우 무거운 모델 호출 없이 빠르게 판별.
+- OCR 오인식을 사람이 직접 검수·수정할 수 있다 — 원본은 그대로 보존한 채 교정본을 별도 저장하고,
+  웹·텔레그램 양쪽에서 수정 가능(`PATCH /api/records/{id}`, [설계 문서](./docs/planning/ocr-error-correction-design.md)).
 
 **단점 / 한계**
-- OCR(Tesseract) 자체 정확도는 클라우드 OCR(AWS Textract, Azure Document Intelligence 등)보다 낮다 — 특히 손글씨·복잡한 표는 취약.
-- 손글씨·사인·사물 사진에 대한 이미지 설명(비전 모델)은 아직 스텁 상태로 실사용 불가.
-- OCR 오인식을 사람이 검수·수정하는 화면/워크플로우가 아직 없다(설계 문서만 존재, [`docs/planning/ocr-error-correction-design.md`](./docs/planning/ocr-error-correction-design.md) 참고).
+- OCR(Tesseract) 자체 정확도는 클라우드 OCR보다 낮다 — 특히 손글씨·복잡한 표는 취약. Google Cloud Vision
+  provider(`core/ocr/providers/google_provider.py`)를 붙일 수 있는 구조는 마련했으나, 이 레포에 실제
+  자격증명이 없어 기본은 여전히 Tesseract만 활성 상태다(AWS/Azure/Naver는 인터페이스만 준비, 자격증명
+  확보 시 실구현 예정).
 - 로컬 MLX 모델 구동은 Apple Silicon 전용이라 다른 환경(Windows/Linux/Intel Mac)에서는 별도 조치가 필요하다.
-- `.doc`(레거시 바이너리)은 아직 미지원. Discord/Slack은 코드는 완성됐으나(아래 채널 목록 참고) 실제 봇 등록·토큰 발급은 유저 액션이 필요해 라이브 연동 테스트는 아직 못 했다.
+- `.doc`(레거시 바이너리, MS Word 구버전)은 아직 미지원(`.docx`는 지원).
+- Discord/Slack은 코드는 완성됐으나 실제 봇 등록·토큰 발급이 유저 액션으로 남아있어 라이브 서버 연동
+  테스트는 아직 못 했다(유닛 테스트 레벨로만 검증).
+- 손글씨/사인 인식은 비전 모델(Qwen2.5-VL)로도 약점으로 확인됨(실측: 직선/곡선 구분 오류 사례 있음) —
+  정교한 필기체 인식은 여전히 신뢰도가 낮다.
 
 ## 구성
 
