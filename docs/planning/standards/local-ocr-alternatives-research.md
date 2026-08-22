@@ -1,68 +1,131 @@
-# Tesseract 대비 로컬 OCR 대안 리서치 + 실측 비교 (2026-08-22)
+# Tesseract보다 정확도 높은 로컬(오프라인) OCR 대안 리서치
 
-> 실측 기반. 리서치만으로 결론 내지 않음(RAG 실패 교훈 준수) — 실행 가능한 후보는 전부 같은 이미지로
-> 직접 실행해 비교했다. 로컬 실행 불가능한 것(국내 VL 모델)은 실행 없이 벤치마크 근거만 전달한다.
+> 실측 기반 문서(2026-08-22). 웹서치 결과만으로 결론 내리지 않고, 실제 이미지로 Tesseract와
+> 나란히 비교 실행한 결과만 신뢰한다(RAG 실패 사례의 교훈 — och.txt 규칙 A).
 
-## 1. 실측 비교 — Tesseract vs Qwen2.5-VL(mlx-vlm, 이미 로드됨)
+## 결론 요약
 
-### 케이스 A: 다국어 팬그램 텍스트 사진(kong-bot photos_02.tif)
+**지금 당장 Tesseract를 교체할 만큼 확실한 대안은 없다. 현상 유지를 권장하며, 판단은 오케 확인 후 결정.**
 
-| 엔진 | 처리시간 | 결과 |
-|---|---|---|
-| Tesseract | 0.64s | `Der ,.schnelle" braune Fuchs springt / iiber den faulen Hund. ... marron rapido ... preguicoso.` — **오류 다수**(über→iiber, marrón→marron 악센트 소실, "o cão"→"0 080" 완전 오인식) |
-| Qwen2.5-VL(mlx-vlm) | 4.14s | `Der „schnelle" braune Fuchs springt / über den faulen Hund. ... marrón rápido ... preguiçoso.` — **전부 정확**(악센트·특수문자 완벽 보존) |
+- `mlx-vlm`(이미 로드된 비전모델 Qwen2.5-VL, **신규 다운로드 0**)을 OCR 프롬프트로 실험한 결과,
+  **다국어(영/독/불/이/포)** 텍스트에서는 Tesseract보다 명확히 우세했다.
+- 그러나 **한글**에서는 완전한 신뢰 수준에 이르지 못했다(부분 실패 — 아래 §3 참고).
+- PaddleOCR·EasyOCR·docTR은 전부 torch 또는 PaddlePaddle 대형 프레임워크에 의존하는데, 실제로
+  EasyOCR을 설치 시도하다 시스템 전역 `setuptools`를 강제 업그레이드해 `mlx_vlm`/`mlx_lm` 임포트
+  체인 전체가 파손되는 사고가 발생했다(즉시 감지·복구했으나 이번이 **세 번째**로 반복된 같은 패턴의
+  사고 — a_19 RAG의 `mlx-embeddings`, a_21 멀티클라우드의 `google-cloud-vision`에 이어).
 
-### 케이스 B: 한글 텍스트(직접 생성 — 안내문+가격+전화번호)
+## 1. 후보 비교표 (문서 조사 기반)
 
-| 엔진 | 처리시간 | 결과 |
-|---|---|---|
-| Tesseract | 0.24s | `안녕하세요 이것은 한글 테스트입니다.\n가격: 12,345원 (부가세 포함)\n전화번호: 010-1234-5678` — **완벽** |
-| Qwen2.5-VL(mlx-vlm) | 0.99s | 동일 결과 — **완벽** |
+| 후보 | 한글 지원 | Apple Silicon | 설치 크기 | 유지보수 | 실측 시도 |
+|---|---|---|---|---|---|
+| PaddleOCR | 지원(PP-OCRv5, `korean_PP-OCRv5_mobile_rec`) | 지원(PaddleOCR-VL은 MLX 백엔드 활용 가능, M4 검증 사례 있음) | 대형(PaddlePaddle 프레임워크 포함, 수백MB) | 활발 | **미시도**(EasyOCR 사고 이후 유사 위험 판단해 보류) |
+| EasyOCR | 지원(`ko` 포함 80+ 언어) | 지원(torch 기반) | torch 포함 시 대형 | 활발 | **설치 시도 → 시스템 파손 → 즉시 폐기**(아래 §4) |
+| docTR | 지원(Korean 명시) | 지원(MPS, ONNX 버전은 CoreML) | torch/tf 기반, 중대형 | 활발 | **미시도**(EasyOCR과 동일 계열 위험 판단) |
+| **mlx-vlm(Qwen2.5-VL, 기존 로드 모델 재사용)** | 부분 지원(§3) | 네이티브(이미 이 프로젝트가 쓰는 스택) | **0**(신규 설치 없음) | 이 프로젝트가 이미 의존 | **실측 완료(안전)** |
 
-### 결론 (실측 기반)
-- **한글 인쇄체는 Tesseract로 이미 충분**(케이스 B 완벽 일치, 4배 더 빠름).
-- **비ASCII 특수문자(유럽어 악센트·세디유 등)가 섞인 텍스트는 Qwen2.5-VL이 확실히 우수**(케이스 A).
-- Qwen2.5-VL은 **이미 로드돼 있어(비전 설명 기능과 공유) 신규 다운로드 0** — network-budget 효율적.
-- **제안**: 지금 당장 Tesseract를 교체하지 말 것. 대신 `core/ocr/provider_base.py`(§14-4에서 만든 provider
-  추상화)에 "mlx_vlm_ocr_provider"를 하나 더 추가해, **Tesseract confidence가 낮은 ambiguous 케이스에서만
-  Qwen2.5-VL로 폴백**하는 하이브리드 구성을 제안(이미 있는 confidence 기반 분기 구조 그대로 재사용 가능).
-  전면 교체가 아니라 **재사용 가능한 폴백 옵션 추가**가 실측 근거상 합리적.
+## 2. 실측 비교 — 다국어 텍스트(kong-bot photos_02.tif)
 
-## 2. 미실행 리서치 — PaddleOCR / EasyOCR / docTR
+### Tesseract 결과
+```
+The (quick) [brown] {fox} jumps!
+Over the $43,456.78 <lazy> #90 dog
+& duck/goose, as 12.5% of E-mail
+from aspammer@website.com is spam.
+Der ,.schnelle" braune Fuchs springt
+iiber den faulen Hund. Le renard brun
+«rapide» saute par-dessus le chien
+paresseux. La volpe marrone rapida
+salta sopra il cane pigro. El zorro
+marron rapido salta sobre el perro
+perezoso. A raposa marrom rapida
+salta sobre 0 080 preguicoso.
+```
+오류: `über`→`iiber`, `marrón`→`marron`(악센트 누락), `cão`→`080`(완전 오인식).
 
-이 레포에 셋 다 미설치(실측: `import` 전부 `ModuleNotFoundError`). 설치 전 벤치마크만 조사:
+### Qwen2.5-VL(mlx-vlm) 결과 — 4.2초
+```
+The (quick) [brown] {fox} jumps!
+Over the $43,456.78 <lazy> #90 dog
+& duck/goose, as 12.5% of E-mail
+from aspammer@website.com is spam.
+Der „schnelle“ braune Fuchs springt
+über den faulen Hund.
+Le renard brun
+«rapide» saute par-dessus le chien
+paresseux.
+La volpe marrone rapida
+salta sopra il cane pigro.
+El zorro
+marrón rápido salta sobre el perro
+perezoso.
+A raposa marrom rápida
+salta sobre o cão preguiçoso.
+```
+**Tesseract가 실패한 4곳 전부 정확** — 악센트·특수문자·독일어 인용부호까지 정밀 재현.
 
-- **PaddleOCR**: 한중일(CJK) 특화 학습으로 한국어 인식에서 강점이 있다는 2026 벤치마크 존재
-  ([koncile.ai](https://www.koncile.ai/en/ressources/paddleocr-analyse-avantages-alternatives-open-source),
-  [codesota.com](https://www.codesota.com/ocr/paddleocr-vs-tesseract)) — "PaddleOCR-VL-1.5(2026-01)가
-  OmniDocBench v1.5에서 94.5% 정확도, 109개 언어 지원"(codesota.com 기사 인용).
-- **Tesseract**: CPU 전용 최소 풋프린트(10MB, 0.77s) 강점 — 이미 이 프로젝트가 쓰는 이유와 일치
-  ([codesota.com](https://www.codesota.com/ocr/paddleocr-vs-tesseract)).
-- **판단**: 케이스 B(한글 인쇄체) 실측에서 이미 Tesseract가 완벽했으므로, PaddleOCR 설치(수백MB급 모델
-  다운로드 추정)까지 감수할 실측 근거는 약하다. **설치·비교는 보류** — 향후 실제 한글 필기체·저품질
-  스캔본에서 Tesseract 오류가 반복 확인되면 그때 재검토 권장.
+## 2-1. 영문 반복 텍스트(kong-bot photos_01.tif) — 대조군
 
-## 3. 국내(한국) VL/멀티모달 모델 — 로컬 실행 가능성 확인
+Tesseract·Qwen2.5-VL(1.8초) 둘 다 완벽하게 동일 텍스트를 반환(무승부). 단순 인쇄체 영문에서는
+차이가 없음을 확인 — Qwen2.5-VL의 우위는 특수문자·악센트·다국어 혼용 케이스에서 두드러진다.
 
-유저 질문: "한국 VL 모델이나 LLM 모델은 아마도 vision 쪽이 평가가 나쁘겠지?" — 추측 없이 확인.
+## 3. 한글 텍스트 실측(직접 제작 이미지)
 
-### 실측 확인 결과
-- **HyperCLOVA X 8B Omni**(네이버): HuggingFace 모델 카드·논문상 "Korean-centric multimodal capabilities...
-  high-density OCR"에 특화 학습됐다고 명시([arxiv.org/abs/2601.01792](https://arxiv.org/html/2601.01792v1)) —
-  **벤치마크 근거상 한국어 OCR/비전 성능은 나쁘지 않고 오히려 특화됨**(유저 추측과 반대).
-  단, **mlx-community 검색 결과 0건**(HuggingFace API 직접 조회) — **로컬 MLX 실행 불가**, 실측 비교 불가.
-- **LG EXAONE**: mlx-community에 `EXAONE-3.5-2.4B-Instruct`(4bit/6bit/8bit/bf16) 존재하나 **텍스트 전용
-  모델**(태그에 vision/image 관련 태그 없음, 아키텍처 `exaone` — 순수 언어모델). **비전 지원 EXAONE 계열은
-  mlx-community에서 확인되지 않음** — 실측 비교 불가.
-- **결론**: 국내 VL 모델 자체의 벤치마크 평가가 나쁜 게 아니라(HyperCLOVA X는 오히려 한국어 OCR 특화),
-  **로컬(MLX) 오프라인 실행 가능한 포팅판이 아직 없어서** 이 프로젝트에서 실측 비교 자체가 불가능한
-  상황이다. 유저의 "평가가 나쁘겠지"라는 추측은 근거상 확인되지 않음 — 오히려 특화 학습됐다는 근거가
-  있으나, 접근 경로(로컬 실행)가 없어 활용 불가.
-- 클라우드 API 경유라면(§14-4 이미 다룸) 네이버 CLOVA OCR로 접근 가능하나, 이건 "로컬" 조건에 안 맞음.
+원본: "대한민국 서울특별시 강남구 테헤란로 123" / "영수증 번호: 2026-08-22-00123" /
+"합계금액: 45,600원 (부가세 포함)"
 
-## 최종 제안 요약
-1. **당장 교체 안 함**(한글은 Tesseract로 충분, 실측 확인).
-2. Qwen2.5-VL을 Tesseract 저신뢰도 폴백 provider로 추가하는 건 향후 검토 가치 있음(신규 다운로드 0).
-3. PaddleOCR 등 신규 설치는 실제 문제(한글 필기체·저품질 스캔 실패 사례)가 쌓이면 재검토.
-4. 국내 VL 모델(HyperCLOVA X)은 로컬 실행 경로가 없어 현재는 활용 불가 — mlx-community 포팅을 주기적으로
-   재확인할 가치는 있음(오늘 기준 0건).
+### Tesseract 결과 — 완전 실패
+```
+'0000000000000723
+
+umm 2026-08-22.00123
+
+sm 45,6000 (erent
+```
+한글을 전혀 인식하지 못하고 숫자·기호 잡음만 출력.
+
+### Qwen2.5-VL(mlx-vlm) 결과 — 1.0초, 부분 실패
+```
+한국어: 123
+한국어: 2026-08-22-00123
+한국어: 45,600 (원)
+```
+숫자·구조(3줄 구성)는 정확히 파악했으나, **실제 한글 문장(주소 "대한민국 서울특별시...")은 누락**하고
+"한국어:"라는 메타 라벨만 붙였다. Tesseract보다는 낫지만(구조·숫자 인식) 완전한 성공은 아니다 —
+정직하게 부분 실패로 기록한다.
+
+## 4. ★사고 기록 — EasyOCR 설치가 시스템을 파손시킨 사례
+
+EasyOCR을 `pip install`하는 과정에서 시스템 전역 `setuptools`가 84.0.0으로 강제 업그레이드되어
+`pkg_resources`가 제거됐고, 그 결과 `librosa`→`transformers`→`mlx_vlm`/`mlx_lm` 임포트 체인 전체가
+파손됐다. 즉시 `easyocr` 제거 + `setuptools<81`로 다운그레이드해 MLX 스택을 완전히 복구했고,
+텔레그램 봇 빌드(`build_application()`, 10개 핸들러)까지 재검증해 정상 동작을 확인했다.
+
+**부수 영향(미해결로 남김)**: 이 과정에서 `torch`가 2.11.0→2.13.0으로 업그레이드된 채 복구되지
+않았다. 이 프로젝트(ocr-lake) 자체는 torch를 사용하지 않아 직접 영향은 없으며(`pip3 check`로
+torch/setuptools 관련 충돌 0건, 텔레그램 회귀 정상 재확인함), 원래 버전을 정확히 알 수 없는 상태에서
+임의로 되돌리는 것 자체가 또 다른 위험이 될 수 있어 **되돌리지 않고 그대로 두었다**. 이 시스템에서
+torch를 사용하는 다른 프로젝트가 있다면 영향 가능성이 있으니 확인이 필요하다.
+
+★이번이 **세 번째로 반복된 동일 패턴의 사고**다:
+1. a_19(RAG): `mlx-embeddings`가 `transformers`를 강제 업그레이드해 파손 위험 발견 → 폐기.
+2. a_21(멀티클라우드 OCR): `google-cloud-vision` SDK가 `protobuf`를 강제 업그레이드해 파손 → 즉시 제거·원복.
+3. a_23(이번): `easyocr`가 `setuptools`를 강제 업그레이드해 MLX 스택 자체를 파손 → 즉시 제거·복구,
+   단 `torch` 부수 영향은 미해결.
+
+**패턴**: 이 머신은 다양한 ML/AI 프로젝트가 공유하는 site-packages 환경이라, 신규 대형 패키지
+설치가 반복적으로 시스템 전역 의존성을 오염시키는 위험이 있다. 향후 신규 패키지 설치 전
+`pip3 install --dry-run`(가능한 경우) 또는 격리 환경(venv) 사용을 고려할 필요가 있다.
+
+## 5. 최종 제안
+
+1. **지금 당장 Tesseract를 교체하지 않는다.** PaddleOCR/EasyOCR/docTR은 실측 검증에 실패했고
+   (EasyOCR은 시스템 파손, 나머지 둘은 유사 위험으로 미시도), 대안으로 실측한 mlx-vlm도 한글에서는
+   아직 신뢰 수준에 못 미친다.
+2. **mlx-vlm을 다국어(비한글) 텍스트의 보조 OCR 폴백으로 검토할 가치는 있다** — 이미 이 프로젝트가
+   의존하는 스택이라 신규 설치가 필요 없고, 다국어 정확도가 Tesseract보다 명확히 우세하다.
+   단, 한글 정확도가 부족하므로 "언어 힌트가 비한글일 때만 mlx-vlm 우선" 같은 조건부 적용이
+   필요할 수 있다 — 별도 설계·구현 작업으로 분리해 오케 확인 후 진행 제안.
+3. **한글 OCR 정확도 개선은 이번 3개 후보로는 해결되지 않았다.** 향후 재검토 시에는 격리 환경(venv)에서
+   먼저 설치·검증 후 시스템 전역에 반영하는 절차를 권장한다.
+4. **torch 2.13.0 잔존**은 오케가 인지하고 필요시 조치 판단 바람(이 프로젝트에는 영향 없음).

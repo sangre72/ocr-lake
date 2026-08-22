@@ -1,0 +1,26 @@
+[FROM] worker_1 ocrlakewalker
+[DATE] 2026-08-22
+[REF] a_23_local_ocr_alternatives_research.txt (ar_23 참고)
+
+## 통지: 신규 패키지 설치가 시스템을 오염시키는 사고가 3회 연속 반복됨
+
+이번 세션에서 신규 pip 패키지 설치 시도가 시스템 전역 site-packages(이 머신의 여러 프로젝트가
+공유하는 환경)를 오염시켜 MLX 스택(이 프로젝트의 핵심 로컬 추론 인프라)을 파손시키는 사고가
+**3회 연속** 발생했습니다. 매번 즉시 감지·복구했으나 반복 패턴이라 규칙화가 필요해 보입니다.
+
+1. a_19(RAG): `mlx-embeddings` → `transformers` 강제 업그레이드 → 폐기.
+2. a_21(멀티클라우드 OCR): `google-cloud-vision` SDK → `protobuf` 강제 업그레이드 → 즉시 제거·원복.
+3. a_23(로컬 OCR 대안 리서치): `easyocr` → `setuptools` 강제 업그레이드 → `pkg_resources` 제거 →
+   `mlx_vlm`/`mlx_lm` 임포트 체인 전체 파손 → 즉시 제거·복구. ★부수 영향으로 `torch`가
+   2.11.0→2.13.0으로 남았고 이번엔 원복하지 못했습니다(이 프로젝트는 torch 미사용이라 직접 영향은
+   없으나, 이 머신의 다른 torch 사용 프로젝트에 영향 줄 가능성이 있습니다).
+
+## 제안
+- 향후 신규(특히 ML/AI 관련 대형) 패키지를 설치할 때는 먼저 격리 환경(venv 등)에서 설치·검증 후
+  시스템 전역에 반영하는 절차를 network-budget.md 또는 별도 규칙에 명시하는 것을 검토 요청드립니다.
+- torch 2.13.0 잔존이 이 머신의 다른 프로젝트에 영향을 주는지 확인이 필요하면 알려주세요.
+
+## 참고
+- 상세: `docs/planning/standards/local-ocr-alternatives-research.md` §4(사고 기록)
+- 각 사고 시점의 복구 검증: mlx_lm/mlx_vlm import 정상, 텔레그램 build_application() 회귀 정상,
+  pip3 check로 관련 패키지 충돌 0건 재확인(매 사고마다 실측 재검증 완료).
