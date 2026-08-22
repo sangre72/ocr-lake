@@ -667,6 +667,23 @@ Orch(session) = the refine/judgment gateway. Bot does **NO reply/archive** in th
 - README.md has a `## License` section mirroring kong-bot's wording. If kong-bot's license terms/copyright
   holder ever change, check whether ocr-lake's copy needs the same update(no automatic sync).
 
+## 10-D. Isolated-experiment principle for model trials (established 2026-08-22)
+
+> User: "전용 subagent로 별도로 구동해야할듯. 기존 서버 루틴을 수정하면 안된다"(a dedicated subagent should
+> run this separately — the existing server routine must not be modified), said when asked to try comparing
+> Qwen3-VL against the currently-deployed Qwen2.5-VL.
+
+- **Any "let's try a new model and compare" task = experiment, not a deployment**, until the user explicitly
+  approves a swap. Directive to the worker MUST state explicitly:
+  - Do NOT modify the operational code path(e.g. `core/vision/describer.py`'s `VLM_MODEL_ID`, `core/ocr/
+    structurer.py`'s `MLX_MODEL_ID`) — run the candidate model from a throwaway script instead.
+  - Do NOT restart/stop the running Telegram bot, web server(uvicorn), or orchestrator processes to run the
+    comparison — the live service must keep responding throughout.
+  - Report the comparison result and a recommendation; **do not implement the swap in the same task** even if
+    the new model wins — that's a separate a_* directive requiring explicit user go-ahead.
+- Rationale: model trials often involve large downloads/high memory use that could destabilize a service
+  that's actively being used(this project's bot/web have been live throughout dev). Isolating the experiment
+  protects uptime(P2 never-dies principle) while still allowing exploration.
 ## 11.5. ★★★ VERIFY before stating + decide WHERE to record first (MUST)
 
 > **Bg incident(repeated in same session)**: orch stated things w/o measuring, became "lies" —
