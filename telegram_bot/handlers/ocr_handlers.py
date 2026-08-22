@@ -65,8 +65,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
     if result.route in ("photo", "ambiguous_photo"):
-        note = result.note or "이미지 설명 기능은 아직 미구현입니다."
-        await message.reply_text(f"[사진으로 인식 — 설명 기능은 준비 중]\n{note}")
+        if result.description:
+            await message.reply_text(f"[사진으로 인식]\n{result.description}")
+        else:
+            note = result.note or "이미지 설명 기능을 사용할 수 없습니다."
+            await message.reply_text(f"[사진으로 인식 — 설명 기능은 준비 중]\n{note}")
         return
 
     text = result.text
