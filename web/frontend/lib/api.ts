@@ -59,6 +59,15 @@ export async function structureRecord(
   return parseJsonOrThrow(res);
 }
 
+export async function correctRecordText(id: number, correctedText: string): Promise<OcrRecord> {
+  const res = await fetch(`${API_BASE}/api/records/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ correctedText }),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export interface AdminJobEntry {
   seq: string;
   title: string;

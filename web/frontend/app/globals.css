@@ -152,6 +152,21 @@ main {
   transform: translateY(1px);
 }
 
+.btn-secondary {
+  background: transparent;
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--background);
+  border-color: var(--brand);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

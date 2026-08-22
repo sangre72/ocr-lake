@@ -25,7 +25,7 @@ app.add_middleware(
         "http://127.0.0.1:3001",
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
