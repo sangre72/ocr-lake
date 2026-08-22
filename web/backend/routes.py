@@ -13,10 +13,12 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
 
+from core.hwp import UnsupportedHwpError, process_hwp
 from core.ocr.engine import ALLOWED_FORMATS, UnsupportedImageError
 from core.ocr.structurer import StructurerNotConfiguredError, structure_text
 from core.pdf import UnsupportedPdfError, process_pdf
 from core.pipeline import process_image
+from core.pptx import UnsupportedPptxError, process_pptx
 from core.storage import get_record, list_records, record_to_dict, save_record, update_structured_json
 from core.video import UnsupportedVideoError, process_video
 
@@ -38,6 +40,10 @@ _EXT_BY_FORMAT = {
 # 실행파일/스크립트는 여전히 차단(security-guideline.md) — 이미지 + pdf/mp4 만 화이트리스트 확장
 _PDF_CONTENT_TYPES = {"application/pdf"}
 _VIDEO_CONTENT_TYPES = {"video/mp4", "video/quicktime", "video/webm", "video/x-msvideo"}
+_PPTX_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+_HWP_CONTENT_TYPES = {"application/x-hwp", "application/haansofthwp", "application/vnd.hancom.hwp"}
 
 
 def _store_upload(raw_bytes: bytes, ext: str) -> Path:
@@ -50,12 +56,20 @@ def _store_upload(raw_bytes: bytes, ext: str) -> Path:
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)) -> dict:
     content_type = (file.content_type or "").lower()
+    filename = (file.filename or "").lower()
     raw_bytes = await file.read()
 
     if content_type in _PDF_CONTENT_TYPES:
         return await _handle_pdf_upload(raw_bytes)
     if content_type in _VIDEO_CONTENT_TYPES:
         return await _handle_video_upload(raw_bytes)
+    if content_type in _PPTX_CONTENT_TYPES:
+        return await _handle_pptx_upload(raw_bytes)
+    # HWP는 브라우저/클라이언트별 content-type 이 표준화되어 있지 않아(빈 값·비표준 값 흔함)
+    # 확장자를 함께 확인한다(보안 검증은 handler 내부에서 실제 파싱 성공 여부로 재확인 — content-type/
+    # 확장자는 라우팅용일 뿐 신뢰 근거가 아님).
+    if content_type in _HWP_CONTENT_TYPES or filename.endswith(".hwp"):
+        return await _handle_hwp_upload(raw_bytes)
     return await _handle_image_upload(raw_bytes)
 
 
@@ -142,6 +156,58 @@ async def _handle_video_upload(video_bytes: bytes) -> dict:
                 {"timestampSec": f.timestamp_sec} for f in result.document_frames
             ],
         },
+    )
+    return record_to_dict(get_record(record_id))
+
+
+async def _handle_pptx_upload(pptx_bytes: bytes) -> dict:
+    if len(pptx_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="PPTX가 너무 큽니다(최대 20MB).")
+
+    try:
+        result = await process_pptx(pptx_bytes)
+    except UnsupportedPptxError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("웹 업로드 PPTX 처리 중 오류")
+        raise HTTPException(status_code=500, detail="PPTX 처리 중 오류가 발생했습니다.") from exc
+
+    stored_path = _store_upload(pptx_bytes, ".pptx")
+    record_id = save_record(
+        source="web",
+        route="pptx_slides",
+        image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
+        extracted_text=result.combined_text,
+        description=f"PPTX {result.slide_count}슬라이드 처리",
+        structured_json={
+            "slides": [
+                {"slideNumber": s.slide_number, "hasText": bool(s.text)}
+                for s in result.slides
+            ]
+        },
+    )
+    return record_to_dict(get_record(record_id))
+
+
+async def _handle_hwp_upload(hwp_bytes: bytes) -> dict:
+    if len(hwp_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="HWP 파일이 너무 큽니다(최대 20MB).")
+
+    try:
+        result = process_hwp(hwp_bytes)
+    except UnsupportedHwpError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("웹 업로드 HWP 처리 중 오류")
+        raise HTTPException(status_code=500, detail="HWP 처리 중 오류가 발생했습니다.") from exc
+
+    stored_path = _store_upload(hwp_bytes, ".hwp")
+    record_id = save_record(
+        source="web",
+        route="hwp_document",
+        image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
+        extracted_text=result.combined_text,
+        description="HWP 문서 처리",
     )
     return record_to_dict(get_record(record_id))
 

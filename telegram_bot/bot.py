@@ -10,6 +10,7 @@ load_dotenv(".env.local")
 from telegram_bot.config import load_config
 from telegram_bot.handlers.ocr_handlers import handle_photo, start, structure
 from telegram_bot.handlers.pdf_video_handlers import handle_pdf, handle_video
+from telegram_bot.handlers.office_handlers import handle_hwp, handle_pptx
 from core.storage import init_db
 
 logging.basicConfig(
@@ -34,6 +35,12 @@ def build_application() -> Application:
     )
     application.add_handler(
         MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video)
+    )
+    application.add_handler(
+        MessageHandler(filters.Document.FileExtension("pptx"), handle_pptx)
+    )
+    application.add_handler(
+        MessageHandler(filters.Document.FileExtension("hwp"), handle_hwp)
     )
 
     return application

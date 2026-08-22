@@ -8,3 +8,5 @@ python-multipart
 pdf2image
 opencv-python
 mlx-lm
+hwp-hwpx-parser
+python-pptx
