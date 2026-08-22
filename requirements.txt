@@ -11,3 +11,6 @@ mlx-lm
 hwp-hwpx-parser
 python-pptx
 python-docx
+discord.py
+slack_sdk
+slack_bolt

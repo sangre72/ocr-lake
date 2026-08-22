@@ -14,6 +14,17 @@
 
 `.doc`(구버전 바이너리)은 아직 미지원입니다.
 
+## 지원 채널
+
+| 채널 | 상태 | 비고 |
+|---|---|---|
+| 텔레그램 | 구현+운영중 | `telegram_bot/` |
+| 웹(FastAPI+Next.js) | 구현+운영중 | `web/` |
+| Discord | 코드 완성, 실연동 미검증 | `discord_bot/` — `DISCORD_BOT_TOKEN` 발급 후 `python3 -m discord_bot.bot` |
+| Slack | 코드 완성, 실연동 미검증 | `slack_bot/` — `SLACK_BOT_TOKEN`·`SLACK_SIGNING_SECRET` 발급 후 `python3 -m slack_bot.bot` |
+
+Discord/Slack은 봇 토큰이 아직 발급되지 않아 실제 서버 연동 테스트는 못 했다(유닛 테스트 레벨로만 검증 — 자세한 내용은 [기술 스펙 §14-3](./docs/tech-spec.md#14-3-채널-확장discordslack-구현됨코드-완성--실-서버-연동은-유저-액션-필요)).
+
 ## 장점 · 단점
 
 **장점**
@@ -27,7 +38,7 @@
 - 손글씨·사인·사물 사진에 대한 이미지 설명(비전 모델)은 아직 스텁 상태로 실사용 불가.
 - OCR 오인식을 사람이 검수·수정하는 화면/워크플로우가 아직 없다(설계 문서만 존재, [`docs/planning/ocr-error-correction-design.md`](./docs/planning/ocr-error-correction-design.md) 참고).
 - 로컬 MLX 모델 구동은 Apple Silicon 전용이라 다른 환경(Windows/Linux/Intel Mac)에서는 별도 조치가 필요하다.
-- `.doc`(레거시 바이너리), Discord/Slack 등 채널 확장은 아직 미착수.
+- `.doc`(레거시 바이너리)은 아직 미지원. Discord/Slack은 코드는 완성됐으나(아래 채널 목록 참고) 실제 봇 등록·토큰 발급은 유저 액션이 필요해 라이브 연동 테스트는 아직 못 했다.
 
 ## 구성
 

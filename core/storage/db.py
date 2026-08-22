@@ -13,7 +13,7 @@ from typing import Iterator, Literal, Optional
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "ocr_lake.db"
 
-Source = Literal["telegram", "web"]
+Source = Literal["telegram", "web", "discord", "slack"]
 Route = Literal[
     "document", "photo", "ambiguous_ocr", "ambiguous_photo",
     "pdf_document", "video_frames", "pptx_slides", "hwp_document", "docx_document",
@@ -23,7 +23,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS ocr_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    source TEXT NOT NULL CHECK (source IN ('telegram', 'web')),
+    source TEXT NOT NULL CHECK (source IN ('telegram', 'web', 'discord', 'slack')),
     image_path TEXT,
     route TEXT NOT NULL CHECK (route IN (
         'document', 'photo', 'ambiguous_ocr', 'ambiguous_photo',
@@ -52,10 +52,30 @@ class OcrRecord:
 
 
 def init_db() -> None:
-    """DB 파일·테이블이 없으면 생성한다. 앱 시작 시 1회 호출."""
+    """DB 파일·테이블이 없으면 생성한다. 앱 시작 시 1회 호출.
+
+    기존 테이블의 CHECK(source) 제약이 낡아 있으면(discord/slack 미포함) 재생성한다
+    (SQLite는 CHECK 제약을 ALTER로 바꿀 수 없어 테이블 재생성 방식 사용).
+    """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _connect() as conn:
-        conn.executescript(_SCHEMA)
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='ocr_records'"
+        ).fetchone()
+        if row is not None and "'discord'" not in (row["sql"] or ""):
+            conn.executescript(
+                "ALTER TABLE ocr_records RENAME TO ocr_records_old_migration;"
+            )
+            conn.executescript(_SCHEMA)
+            conn.executescript(
+                "INSERT INTO ocr_records "
+                "(id, created_at, source, image_path, route, extracted_text, description, structured_json, chat_id) "
+                "SELECT id, created_at, source, image_path, route, extracted_text, description, structured_json, chat_id "
+                "FROM ocr_records_old_migration;"
+                "DROP TABLE ocr_records_old_migration;"
+            )
+        else:
+            conn.executescript(_SCHEMA)
 
 
 @contextmanager
