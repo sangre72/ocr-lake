@@ -15,3 +15,5 @@ discord.py
 slack_sdk
 slack_bolt
 psycopg
+mlx-vlm
+soxr
