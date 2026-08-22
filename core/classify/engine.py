@@ -72,11 +72,24 @@ def classify_image(image_bytes: bytes, lang: str = "kor+eng") -> ImageKind:
     Raises:
         UnsupportedImageError: 이미지가 아니거나 허용되지 않은 포맷인 경우
     """
+    kind, _ = classify_image_with_confidence(image_bytes, lang=lang)
+    return kind
+
+
+def classify_image_with_confidence(
+    image_bytes: bytes, lang: str = "kor+eng"
+) -> tuple[ImageKind, float]:
+    """classify_image 와 동일 판정 로직이되, 평균 confidence 도 함께 반환한다.
+
+    §14-7(OCR 오인식 대처) 1단계 — 지금까지 계산만 하고 버려지던 avg_conf 를
+    ocr_records.original_confidence 로 저장하기 위해 신설(behavior-preserving, classify_image
+    자체는 이 함수의 kind 만 취하도록 유지해 기존 호출부에 영향 없음).
+    """
     image = _load_image(image_bytes)
     word_count, avg_conf = _text_signal(image, lang)
 
     if word_count >= _MIN_WORDS_FOR_DOCUMENT and avg_conf >= _MIN_AVG_CONF_FOR_DOCUMENT:
-        return "document"
+        return "document", avg_conf
     if word_count <= _MAX_WORDS_FOR_PHOTO and avg_conf <= _MAX_AVG_CONF_FOR_PHOTO:
-        return "photo"
-    return "ambiguous"
+        return "photo", avg_conf
+    return "ambiguous", avg_conf

@@ -33,9 +33,17 @@ CREATE TABLE IF NOT EXISTS ocr_records (
     description TEXT,
     structured_json JSONB,
     chat_id BIGINT,
-    embedding vector({EMBEDDING_DIM})
+    embedding vector({EMBEDDING_DIM}),
+    corrected_text TEXT,
+    is_corrected BOOLEAN NOT NULL DEFAULT false,
+    corrected_at TIMESTAMPTZ,
+    original_confidence REAL
 );
 CREATE INDEX IF NOT EXISTS idx_ocr_records_created_at ON ocr_records(created_at DESC);
+ALTER TABLE ocr_records ADD COLUMN IF NOT EXISTS corrected_text TEXT;
+ALTER TABLE ocr_records ADD COLUMN IF NOT EXISTS is_corrected BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE ocr_records ADD COLUMN IF NOT EXISTS corrected_at TIMESTAMPTZ;
+ALTER TABLE ocr_records ADD COLUMN IF NOT EXISTS original_confidence REAL;
 """
 
 
@@ -82,13 +90,14 @@ class PostgresProvider:
         description: Optional[str] = None,
         structured_json: Optional[dict] = None,
         chat_id: Optional[int] = None,
+        original_confidence: Optional[float] = None,
     ) -> int:
         with self._connect() as conn:
             row = conn.execute(
                 """
                 INSERT INTO ocr_records
-                    (source, image_path, route, extracted_text, description, structured_json, chat_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (source, image_path, route, extracted_text, description, structured_json, chat_id, original_confidence)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -99,6 +108,7 @@ class PostgresProvider:
                     description,
                     json.dumps(structured_json, ensure_ascii=False) if structured_json else None,
                     chat_id,
+                    original_confidence,
                 ),
             ).fetchone()
             conn.commit()
@@ -109,6 +119,18 @@ class PostgresProvider:
             conn.execute(
                 "UPDATE ocr_records SET structured_json = %s WHERE id = %s",
                 (json.dumps(structured_json, ensure_ascii=False), record_id),
+            )
+            conn.commit()
+
+    def update_corrected_text(self, record_id: int, corrected_text: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE ocr_records
+                SET corrected_text = %s, is_corrected = true, corrected_at = now()
+                WHERE id = %s
+                """,
+                (corrected_text, record_id),
             )
             conn.commit()
 
@@ -143,4 +165,8 @@ def _row_to_record(row: dict) -> OcrRecord:
         description=row["description"],
         structured_json=row["structured_json"],
         chat_id=row["chat_id"],
+        corrected_text=row.get("corrected_text"),
+        is_corrected=bool(row.get("is_corrected")),
+        corrected_at=str(row["corrected_at"]) if row.get("corrected_at") else None,
+        original_confidence=row.get("original_confidence"),
     )

@@ -32,10 +32,22 @@ CREATE TABLE IF NOT EXISTS ocr_records (
     extracted_text TEXT,
     description TEXT,
     structured_json TEXT,
-    chat_id INTEGER
+    chat_id INTEGER,
+    corrected_text TEXT,
+    is_corrected INTEGER NOT NULL DEFAULT 0,
+    corrected_at TEXT,
+    original_confidence REAL
 );
 CREATE INDEX IF NOT EXISTS idx_ocr_records_created_at ON ocr_records(created_at DESC);
 """
+
+# 마이그레이션 전용 컬럼 목록(§14-7 1단계 — OCR 오인식 수정 기능)
+_CORRECTION_COLUMNS = (
+    ("corrected_text", "TEXT"),
+    ("is_corrected", "INTEGER NOT NULL DEFAULT 0"),
+    ("corrected_at", "TEXT"),
+    ("original_confidence", "REAL"),
+)
 
 
 @dataclass
@@ -49,6 +61,10 @@ class OcrRecord:
     description: Optional[str]
     structured_json: Optional[dict]
     chat_id: Optional[int]
+    corrected_text: Optional[str] = None
+    is_corrected: bool = False
+    corrected_at: Optional[str] = None
+    original_confidence: Optional[float] = None
 
 
 def init_db() -> None:
@@ -56,6 +72,7 @@ def init_db() -> None:
 
     기존 테이블의 CHECK(source) 제약이 낡아 있으면(discord/slack 미포함) 재생성한다
     (SQLite는 CHECK 제약을 ALTER로 바꿀 수 없어 테이블 재생성 방식 사용).
+    그 외 신규 컬럼(§14-7 correction 컬럼 등)은 ALTER TABLE ADD COLUMN 으로 점진 추가한다.
     """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _connect() as conn:
@@ -76,6 +93,13 @@ def init_db() -> None:
             )
         else:
             conn.executescript(_SCHEMA)
+
+        existing_cols = {
+            r["name"] for r in conn.execute("PRAGMA table_info(ocr_records)").fetchall()
+        }
+        for col_name, col_type in _CORRECTION_COLUMNS:
+            if col_name not in existing_cols:
+                conn.execute(f"ALTER TABLE ocr_records ADD COLUMN {col_name} {col_type}")
 
 
 @contextmanager
@@ -98,14 +122,15 @@ def save_record(
     description: Optional[str] = None,
     structured_json: Optional[dict] = None,
     chat_id: Optional[int] = None,
+    original_confidence: Optional[float] = None,
 ) -> int:
     """처리 결과 1건을 저장하고 새 레코드 id 를 반환한다."""
     with _connect() as conn:
         cur = conn.execute(
             """
             INSERT INTO ocr_records
-                (source, image_path, route, extracted_text, description, structured_json, chat_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (source, image_path, route, extracted_text, description, structured_json, chat_id, original_confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source,
@@ -115,6 +140,7 @@ def save_record(
                 description,
                 json.dumps(structured_json, ensure_ascii=False) if structured_json else None,
                 chat_id,
+                original_confidence,
             ),
         )
         return cur.lastrowid
@@ -129,8 +155,26 @@ def update_structured_json(record_id: int, structured_json: dict) -> None:
         )
 
 
+def update_corrected_text(record_id: int, corrected_text: str) -> None:
+    """사람이 수정한 최종 텍스트를 저장한다(§14-7 1단계).
+
+    extracted_text(OCR 원본)는 그대로 보존하고 corrected_text 에만 반영한다
+    (docs/planning/ocr-error-correction-design.md §4 원칙).
+    """
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE ocr_records
+            SET corrected_text = ?, is_corrected = 1, corrected_at = datetime('now')
+            WHERE id = ?
+            """,
+            (corrected_text, record_id),
+        )
+
+
 def _row_to_record(row: sqlite3.Row) -> OcrRecord:
     structured = json.loads(row["structured_json"]) if row["structured_json"] else None
+    keys = row.keys()
     return OcrRecord(
         id=row["id"],
         created_at=row["created_at"],
@@ -141,6 +185,10 @@ def _row_to_record(row: sqlite3.Row) -> OcrRecord:
         description=row["description"],
         structured_json=structured,
         chat_id=row["chat_id"],
+        corrected_text=row["corrected_text"] if "corrected_text" in keys else None,
+        is_corrected=bool(row["is_corrected"]) if "is_corrected" in keys else False,
+        corrected_at=row["corrected_at"] if "corrected_at" in keys else None,
+        original_confidence=row["original_confidence"] if "original_confidence" in keys else None,
     )
 
 
@@ -167,7 +215,11 @@ def get_record(record_id: int) -> Optional[OcrRecord]:
 
 
 def record_to_dict(record: OcrRecord) -> dict:
-    """DB 스네이크케이스 → API/프론트 camelCase 변환(naming-standard.md)."""
+    """DB 스네이크케이스 → API/프론트 camelCase 변환(naming-standard.md).
+
+    correctedText/extractedText 둘 다 그대로 반환한다(백엔드가 우선순위를 임의로 정하지 않음
+    — docs/planning/ocr-error-correction-design.md §4: 표시용 텍스트 우선순위 판단은 프론트 몫).
+    """
     return {
         "id": record.id,
         "createdAt": record.created_at,
@@ -178,4 +230,8 @@ def record_to_dict(record: OcrRecord) -> dict:
         "description": record.description,
         "structuredJson": record.structured_json,
         "chatId": record.chat_id,
+        "correctedText": record.corrected_text,
+        "isCorrected": record.is_corrected,
+        "correctedAt": record.corrected_at,
+        "originalConfidence": record.original_confidence,
     }

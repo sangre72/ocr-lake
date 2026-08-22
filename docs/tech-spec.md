@@ -429,19 +429,25 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
   패턴과 동일 구조) + `core/ocr/providers/tesseract_provider.py`(기존 `core/ocr/engine.py` 를
   behavior-preserving 하게 감싼 기본 구현체) + `core/ocr/providers/google_provider.py`(Google Cloud
   Vision — 코드는 완성, 이 레포 `.env` 에 자격증명이 없어 실제 API 호출은 미검증. 자격증명 없으면
-  `GoogleVisionCredentialsError` 로 명확히 실패).
+  `GoogleVisionNotConfiguredError` 로 명확히 실패).
+  - ★설계 변경(a_21 진행 중 실측 발견): 공식 `google-cloud-vision` SDK를 설치하면 시스템 전역
+    `protobuf`가 7.x로 강제 업그레이드돼 다른 프로젝트(tensorflow 등, `protobuf<6.0` 요구)를 깨뜨리는
+    의존성 충돌이 실측 확인됐다(a_19 RAG 실패와 동일 패턴 — 신규 대형 패키지의 시스템 전역 오염).
+    설치→충돌 확인 즉시 제거·원복하고, 대신 Google Vision **REST API를 `requests`로 직접 호출**하는
+    방식으로 재작성 — 신규 의존성 0.
 - **자격증명 실측 확인(2026-08-22)**: 이 레포의 `.env`/`.env.local`/`telegram_bot/orchestrator/.env`
   어디에도 AWS/GCP/Azure/Naver Cloud 자격증명이 없음(실측 grep 확인). Google Cloud Vision을 1순위로
-  선정한 이유: API가 서비스계정 키 1개로 단순하고 무료 티어가 있음(`docs/research/ocr-technology-trends.md`
+  선정한 이유: API가 API 키 1개로 단순하고 무료 티어가 있음(`docs/research/ocr-technology-trends.md`
   비교 참고).
   - **AWS Textract**: 표/폼/키-값 구조화 추출에 강함. 복잡 문서(영수증·송장) 정확도 높음.
   - **Microsoft Azure Document Intelligence**(구 Form Recognizer): 사전학습 영수증/명함/송장 모델 제공,
     2026 벤치마크 기준 정확도 상위권.
   - **Naver CLOVA OCR**: 한국어·영수증/사업자등록증 등 국내 도메인 특화 모델, 한글 필기체 지원.
-- **미구현(인터페이스 설계만, 코드 없음 — SDK 미설치, network-budget.md 준수)**: AWS/Azure/Naver
-  provider는 이번 작업에서 만들지 않았다(과설계 방지 — 자격증명 없는 provider를 3개나 동시에 만드는 건
-  검증 불가능한 코드만 늘리는 것). 실제 자격증명이 발급되면 `core/ocr/providers/{aws,azure,naver}_provider.py`
-  를 `google_provider.py`와 같은 패턴(Protocol 구현 + 자격증명 없으면 명확한 에러)으로 추가하면 된다.
+- **인터페이스만(자격증명 없음, 실 API 미연동, SDK 미설치 — network-budget.md 준수)**:
+  `core/ocr/providers/{aws,azure,naver}_provider.py` — 3개 전부 `OcrProvider` Protocol을 구현한 코드는
+  이미 존재하며, `extract_text()` 호출 시 각각 명확한 `NotImplementedError`(자격증명·SDK 부재를 안내)를
+  던진다. 실제 자격증명이 확보되면 그 provider의 `raise NotImplementedError(...)` 자리를
+  `google_provider.py`(REST 우선) 또는 해당 SDK 실호출로 교체하면 된다.
 - **폴백 트리거(다음 단계, 이번엔 미착수)**: `core/classify/engine.py`의 저신뢰도 판정(ambiguous/photo)에서
   Tesseract 결과가 불충분할 때 설정된 클라우드 provider로 재시도하는 옵션 — provider 등록은 됐으니 다음
   작업에서 연결 가능.
@@ -458,10 +464,20 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
   실패 사례가 있었음(§10-A-3의 정정 기록 — 원인은 봇-봇 DM 차단이 아니라 다른 요인으로 추정, 확정 원인
   미규명). 현재는 manifest pull(§10-A)이 폴백 경로로 병행 운영 중. 재발 시 원인 규명 필요.
 
-### 14-7. OCR 오인식 대처 + 휴먼 인터페이스 연동 `계획 — 기획 완료`
+### 14-7. OCR 오인식 대처 + 휴먼 인터페이스 연동 `구현됨(1·2단계)`
 - OCR은 100% 정확하지 않으므로, 오인식을 발견하고 사람이 직접 교정할 수 있는 흐름이 필요하다.
 - 상세 기획: [OCR 오인식 대처 + 휴먼 인터페이스 연동 기획](./planning/ocr-error-correction-design.md)
-  — 업무 의도, 오인식 발견 방법 3안 비교(1차 채택: 유저 능동 신고 + 항상 노출되는 수정 UI),
-  웹/텔레그램 휴먼 인터페이스 설계, `ocr_records` 스키마 확장 제안(`corrected_text`·`is_corrected`·
-  `corrected_at`), 구현 우선순위(P1: 웹 수정 UI → P2: 텔레그램 수정 버튼 → P3: word-level confidence
-  자동 하이라이트) 포함.
+  — 업무 의도, 오인식 발견 방법 3안 비교(1차 채택: 유저 능동 신고 + 항상 노출되는 수정 UI).
+- **1단계(구현됨)**: `ocr_records` 테이블에 `corrected_text`·`is_corrected`·`corrected_at`·
+  `original_confidence` 컬럼 추가(SQLite/PostgreSQL 양쪽, `ALTER TABLE` 마이그레이션 — 기존 데이터 보존).
+  `PATCH /api/records/{id}` 로 교정 텍스트 저장(`extracted_text` 원본은 그대로 보존). 웹
+  `RecordDetail.tsx` 에 원본 대조("원본 OCR 결과 보기") + 수정 UI(textarea+저장/취소, label·
+  aria-invalid·aria-describedby 등 accessibility-guideline.md 준수).
+- **2단계(구현됨)**: 텔레그램 OCR 결과 회신에 "✏️ 수정하기" 인라인 버튼 → 클릭 시 다음 텍스트
+  메시지를 그 레코드의 `corrected_text` 로 저장(`telegram_bot/handlers/ocr_handlers.py`
+  `handle_correct_callback`/`handle_correction_text`).
+- **3단계(계획, 미착수)**: word-level confidence 자동 하이라이트 — `core/classify/engine.py` 의
+  `classify_image_with_confidence()`(1단계 구현 중 신설, 평균 confidence 반환)를 이미 1단계에서
+  `original_confidence` 저장에 재사용 중이나, 단어별(word-level) confidence 를 프론트에 노출해
+  하이라이트하는 기능 자체는 아직 없음.
+- **4단계(장기, 계획)**: 구조화 정합성 휴리스틱 — §14-1 구조화 기능이 더 안정화된 뒤 검토.

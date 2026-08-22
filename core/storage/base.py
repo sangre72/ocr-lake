@@ -24,10 +24,14 @@ class StorageProvider(Protocol):
         description: Optional[str] = None,
         structured_json: Optional[dict] = None,
         chat_id: Optional[int] = None,
+        original_confidence: Optional[float] = None,
     ) -> int:
         ...
 
     def update_structured_json(self, record_id: int, structured_json: dict) -> None:
+        ...
+
+    def update_corrected_text(self, record_id: int, corrected_text: str) -> None:
         ...
 
     def list_records(self, page: int = 1, size: int = 20) -> tuple[list[OcrRecord], int]:

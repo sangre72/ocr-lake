@@ -2,7 +2,7 @@
 
 import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
@@ -11,8 +11,12 @@ from telegram_bot.handlers.common import is_allowed, save_record_safely
 from core.ocr.engine import UnsupportedImageError
 from core.ocr.structurer import StructurerNotConfiguredError, structure_text
 from core.pipeline import process_image
+from core.storage import update_corrected_text
 
 logger = logging.getLogger(__name__)
+
+# "수정하기" 콜백 데이터 프리픽스(record id 이어붙임) — §14-7 2단계
+_CORRECT_CALLBACK_PREFIX = "ocr_correct:"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -57,11 +61,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("이미지 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
         return
 
-    save_record_safely(
+    record_id = save_record_safely(
         route=result.route,
         chat_id=message.chat_id,
         extracted_text=result.text,
         description=result.description,
+        original_confidence=result.confidence,
     )
 
     if result.route in ("photo", "ambiguous_photo"):
@@ -80,7 +85,58 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     context.user_data["last_ocr_text"] = text
     label = "[문서로 인식]" if result.route == "document" else "[문서로 판단(애매) — OCR 결과]"
     reply = text if len(text) <= 3500 else text[:3500] + "\n…(이하 생략)"
-    await message.reply_text(f"{label}\n추출된 텍스트:\n\n{reply}")
+
+    reply_markup = None
+    if record_id is not None:
+        reply_markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("✏️ 수정하기", callback_data=f"{_CORRECT_CALLBACK_PREFIX}{record_id}")]]
+        )
+    await message.reply_text(f"{label}\n추출된 텍스트:\n\n{reply}", reply_markup=reply_markup)
+
+
+async def handle_correct_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """"수정하기" 인라인 버튼 클릭 — 다음 텍스트 메시지를 correctedText 로 받을 준비를 한다."""
+    query = update.callback_query
+    if query is None or not query.data or not query.data.startswith(_CORRECT_CALLBACK_PREFIX):
+        return
+    await query.answer()
+
+    try:
+        record_id = int(query.data[len(_CORRECT_CALLBACK_PREFIX):])
+    except ValueError:
+        return
+
+    context.user_data["pending_correction_record_id"] = record_id
+    if query.message:
+        await query.message.reply_text(
+            "수정할 텍스트를 이어서 보내주세요(원본 텍스트는 그대로 보존되고, 이 내용으로 교정본만 저장됩니다)."
+        )
+
+
+async def handle_correction_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """"수정하기" 버튼 이후 도착한 텍스트를 correctedText 로 저장한다.
+
+    Returns:
+        True 면 이 메시지를 교정 입력으로 소비했다는 뜻(호출부가 다른 핸들러로 넘기지 않게).
+        False 면 대기 중인 교정 요청이 없어 아무 것도 하지 않았다는 뜻.
+    """
+    record_id = context.user_data.pop("pending_correction_record_id", None)
+    if record_id is None:
+        return False
+
+    text = update.message.text if update.message else None
+    if not text:
+        return False
+
+    try:
+        update_corrected_text(record_id, text)
+    except Exception:
+        logger.exception("교정 텍스트 저장 실패")
+        await update.message.reply_text("교정 텍스트 저장 중 오류가 발생했습니다.")
+        return True
+
+    await update.message.reply_text(f"✅ 수정 완료(레코드 #{record_id}). 원본은 그대로 보존됩니다.")
+    return True
 
 
 def _is_image_document(document) -> bool:

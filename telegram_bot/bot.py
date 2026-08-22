@@ -3,12 +3,24 @@
 import logging
 
 from dotenv import load_dotenv
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 load_dotenv(".env.local")
 
 from telegram_bot.config import load_config
-from telegram_bot.handlers.ocr_handlers import handle_photo, start, structure
+from telegram_bot.handlers.ocr_handlers import (
+    handle_correct_callback,
+    handle_correction_text,
+    handle_photo,
+    start,
+    structure,
+)
 from telegram_bot.handlers.pdf_video_handlers import handle_pdf, handle_video
 from telegram_bot.handlers.office_handlers import handle_docx, handle_hwp, handle_pptx
 from core.storage import init_db
@@ -45,6 +57,10 @@ def build_application() -> Application:
     application.add_handler(
         MessageHandler(filters.Document.FileExtension("docx"), handle_docx)
     )
+    application.add_handler(CallbackQueryHandler(handle_correct_callback))
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_correction_text)
+    )
 
     return application
 
@@ -52,7 +68,7 @@ def build_application() -> Application:
 def main() -> None:
     application = build_application()
     logger.info("ocr-lake 텔레그램 봇 시작(polling)")
-    application.run_polling(allowed_updates=["message"])
+    application.run_polling(allowed_updates=["message", "callback_query"])
 
 
 if __name__ == "__main__":

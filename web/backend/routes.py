@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
+from pydantic import BaseModel
 
 from core.docx import UnsupportedDocxError, process_docx
 from core.hwp import UnsupportedHwpError, process_hwp
@@ -20,7 +21,14 @@ from core.ocr.structurer import StructurerNotConfiguredError, structure_text
 from core.pdf import UnsupportedPdfError, process_pdf
 from core.pipeline import process_image
 from core.pptx import UnsupportedPptxError, process_pptx
-from core.storage import get_record, list_records, record_to_dict, save_record, update_structured_json
+from core.storage import (
+    get_record,
+    list_records,
+    record_to_dict,
+    save_record,
+    update_corrected_text,
+    update_structured_json,
+)
 from core.video import UnsupportedVideoError, process_video
 
 logger = logging.getLogger(__name__)
@@ -103,6 +111,7 @@ async def _handle_image_upload(image_bytes: bytes) -> dict:
         image_path=str(stored_path.relative_to(UPLOAD_DIR.parent.parent)),
         extracted_text=result.text,
         description=result.description,
+        original_confidence=result.confidence,
     )
     return record_to_dict(get_record(record_id))
 
@@ -258,6 +267,27 @@ async def get_record_detail(record_id: int) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
     return record_to_dict(record)
+
+
+class RecordCorrectionRequest(BaseModel):
+    correctedText: str
+
+
+@router.patch("/records/{record_id}")
+async def patch_record_correction(record_id: int, body: RecordCorrectionRequest) -> dict:
+    """사람이 검수한 교정 텍스트를 저장한다(§14-7 1단계 — OCR 오인식 수정).
+
+    extracted_text(OCR 원본)는 그대로 두고 corrected_text 에만 반영한다
+    (docs/planning/ocr-error-correction-design.md §4 원칙).
+    """
+    record = get_record(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="레코드를 찾을 수 없습니다.")
+    if not body.correctedText.strip():
+        raise HTTPException(status_code=400, detail="correctedText 는 빈 문자열일 수 없습니다.")
+
+    update_corrected_text(record_id, body.correctedText)
+    return record_to_dict(get_record(record_id))
 
 
 @router.post("/records/{record_id}/structure")

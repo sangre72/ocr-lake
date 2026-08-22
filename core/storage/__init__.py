@@ -16,6 +16,7 @@ __all__ = [
     "get_record",
     "record_to_dict",
     "update_structured_json",
+    "update_corrected_text",
     "get_storage_provider",
 ]
 
@@ -58,3 +59,7 @@ def get_record(record_id: int):
 
 def update_structured_json(record_id: int, structured_json: dict) -> None:
     get_storage_provider().update_structured_json(record_id, structured_json)
+
+
+def update_corrected_text(record_id: int, corrected_text: str) -> None:
+    get_storage_provider().update_corrected_text(record_id, corrected_text)

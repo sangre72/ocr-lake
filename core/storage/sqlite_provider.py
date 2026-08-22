@@ -23,6 +23,7 @@ class SqliteProvider:
         description: Optional[str] = None,
         structured_json: Optional[dict] = None,
         chat_id: Optional[int] = None,
+        original_confidence: Optional[float] = None,
     ) -> int:
         return db.save_record(
             source=source,
@@ -32,10 +33,14 @@ class SqliteProvider:
             description=description,
             structured_json=structured_json,
             chat_id=chat_id,
+            original_confidence=original_confidence,
         )
 
     def update_structured_json(self, record_id: int, structured_json: dict) -> None:
         db.update_structured_json(record_id, structured_json)
+
+    def update_corrected_text(self, record_id: int, corrected_text: str) -> None:
+        db.update_corrected_text(record_id, corrected_text)
 
     def list_records(self, page: int = 1, size: int = 20) -> tuple[list[OcrRecord], int]:
         return db.list_records(page=page, size=size)
