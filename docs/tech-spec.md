@@ -1,134 +1,339 @@
 # ocr-lake 기술 스펙
 
-> 실측 기반 작성(코드 직접 확인). "구현됨"/"계획" 배지로 현재 상태와 로드맵을 구분한다.
+> 실측 기반 문서(2026-08-22 시점 코드 실측). "구현됨" / "계획" 배지로 현재 상태와 로드맵을 명확히 구분한다.
 
-## 아키텍처 개요
+## 목차
 
-```
-core/                채널 무관 핵심 로직
-telegram_bot/        텔레그램 채널 어댑터 + 오케스트레이터 운영 인프라
-web/backend/         FastAPI(core/ 를 참조)
-web/frontend/        Next.js
-```
-
-`web/backend`·`telegram_bot/handlers`는 둘 다 `core/` 를 참조하는 대칭 구조다(채널마다 core 파이프라인을 재사용, 로직 중복 없음).
-
----
-
-## 1. 현재 구현된 것 `[구현됨]`
-
-### 1.1 이미지 유형 분류 게이트 — `core/classify/engine.py`
-Tesseract `image_to_data`의 단어별 confidence·인식 단어 수로 판별.
-
-| 판정 | 조건 |
-|---|---|
-| `document` | 단어수 ≥5 그리고 평균confidence ≥60.0 |
-| `photo` | 단어수 ≤2 그리고 평균confidence ≤40.0 |
-| `ambiguous` | 그 외 |
-
-### 1.2 OCR 엔진 — `core/ocr/engine.py`
-- Tesseract 기반, `extract_text(image_bytes, lang="kor+eng")`.
-- 지원 포맷: `JPEG, PNG, WEBP, BMP, TIFF`(그 외 `UnsupportedImageError`).
-
-### 1.3 PDF 처리 — `core/pdf/engine.py`
-- `pdf2image`(poppler)로 페이지별 PNG 렌더링(200dpi, 최대 30페이지) → 각 페이지를 `core.pipeline.process_image`에 그대로 태움(로직 재사용, 재발명 없음).
-- 페이지 안의 스캔된 서명·손글씨는 페이지 전체를 이미지로 취급하는 것으로 자동 커버 — 별도 임베디드-이미지(XObject) 추출은 하지 않음.
-
-### 1.4 동영상 처리 — `core/video/engine.py`
-- OpenCV로 기본 2.5초 간격, 최대 30프레임 샘플링 → 프레임마다 `process_image` 재사용.
-- `route`가 `document`/`ambiguous_ocr`이고 텍스트가 있는 프레임만 결과에 남김(사물/배경 프레임 스킵).
-
-### 1.5 분기 파이프라인 — `core/pipeline.py`
-`process_image()` 라우팅: `document`→OCR / `photo`→이미지설명(스텁) / `ambiguous`→OCR 우선시도 후 10자 미만이면 설명 폴백.
-
-| route | 의미 |
-|---|---|
-| `document` | 문서로 분류, OCR 텍스트 있음 |
-| `photo` | 사진으로 분류, 설명 스텁 |
-| `ambiguous_ocr` | 애매했으나 OCR 텍스트 확보 |
-| `ambiguous_photo` | 애매했고 텍스트 부족, 설명 폴백 |
-| `pdf_document` | PDF 처리 결과(라우트 레벨 상위값) |
-| `video_frames` | 동영상 처리 결과 |
-
-### 1.6 저장소 — `core/storage/db.py`
-SQLite(`data/ocr_lake.db`), 테이블 `ocr_records`:
-
-| 컬럼 | 타입 | 비고 |
-|---|---|---|
-| id | INTEGER PK | |
-| created_at | TEXT | 기본값 now |
-| source | TEXT | `telegram` \| `web` |
-| image_path | TEXT | |
-| route | TEXT | 위 route 값들 |
-| extracted_text | TEXT | |
-| description | TEXT | |
-| structured_json | TEXT | JSON 직렬화 |
-| chat_id | INTEGER | 텔레그램 발신자(웹은 null) |
-
-DB 스네이크케이스 ↔ API/프론트 camelCase 변환은 `record_to_dict()`가 담당(naming-standard.md).
-
-### 1.7 텔레그램 봇 — `telegram_bot/`
-- 명령: `/start`, `/structure`(마지막 OCR 텍스트 구조화 — 현재 스텁 에러 반환).
-- 메시지 핸들러: 사진/이미지문서 → `handle_photo`, PDF → `handle_pdf`, 동영상 → `handle_video`.
-
-### 1.8 웹 API — `web/backend/routes.py`
-| Method | Path | 설명 |
-|---|---|---|
-| POST | `/api/upload` | content-type으로 이미지/PDF/동영상 분기 처리 후 DB 저장, 레코드 반환 |
-| GET | `/api/records?page=&size=` | 이력 목록(페이징) |
-| GET | `/api/records/{id}` | 상세 조회 |
-| GET | `/api/health` | 헬스체크 |
-
-업로드 크기 상한: 이미지/PDF 20MB, 동영상 100MB. 저장 파일명은 서버 uuid4 랜덤 생성(원본 파일명 미신뢰).
-
-### 1.9 웹 프론트 — `web/frontend/app/`
-| Route | 화면 |
-|---|---|
-| `/` | 업로드(드래그앤드롭, 결과 표시) |
-| `/records` | 이력 목록 |
-| `/records/[id]` | 상세 조회 |
-
-### 1.10 오케스트레이터 인프라 — `telegram_bot/orchestrator/`
-`och.txt` 규약: 텔레그램 요청(`u_*.txt`) → 오케(세션)가 정제 → 워커 지시서(`a_*.txt`) → 워커 응답(`ar_*.txt`) → 텔레그램 회신, 파일큐 기반 위임 구조. `kong-bot`(형제 프로젝트) 연동: §10-A(파일 pull), §10-B(자격증명 공유해 자동 push), §10-C(라이선스 정책).
-
-### 1.11 구조화 AI `[스텁 — 미구현]`
-- `core/ocr/structurer.py`(`structure_text`): 문서유형별(영수증/명함 등) 구조화 파싱 — AI 모델(Claude/GPT) 미정, 호출 시 `StructurerNotConfiguredError`.
-- `core/vision/describer.py`(`image_describe`): 이미지 설명(비전 모델) — 마찬가지로 미정, `DescriberNotConfiguredError`.
-
-### 1.12 라이선스
-`PolyForm Noncommercial License 1.0.0`(kong-bot과 동일 정책) — 개인/비상업 무료, 상업적 사용은 별도 유료 계약.
+1. [아키텍처 개요](#1-아키텍처-개요)
+2. [이미지 유형 분류 게이트](#2-이미지-유형-분류-게이트-구현됨)
+3. [OCR 엔진](#3-ocr-엔진-구현됨)
+4. [PDF 처리](#4-pdf-처리-구현됨)
+5. [동영상 처리](#5-동영상-처리-구현됨)
+6. [분기 파이프라인](#6-분기-파이프라인-구현됨)
+7. [저장소(SQLite)](#7-저장소sqlite-구현됨)
+8. [텔레그램 봇](#8-텔레그램-봇-구현됨)
+9. [웹 API](#9-웹-apifastapi-구현됨)
+10. [웹 프론트(Next.js)](#10-웹-프론트nextjs-구현됨)
+11. [오케스트레이터 인프라](#11-오케스트레이터-인프라-구현됨)
+12. [AI 구조화/비전 — 스텁 상태](#12-ai-구조화비전--스텁-상태-미구현)
+13. [라이선스](#13-라이선스-구현됨)
+14. [로드맵(앞으로 구현될 것)](#14-로드맵-앞으로-구현될-것)
 
 ---
 
-## 2. 앞으로 구현될 것(로드맵) `[계획]`
+## 1. 아키텍처 개요
 
-### 2.1 AI 구조화 파싱 `[계획]`
-`structurer.py` 스텁을 실제 모델(Claude/GPT 등)로 구현. 모델 미정 — 별도 결정 필요.
+`구현됨`
 
-### 2.2 이미지 설명(비전 모델) `[계획]`
-`describer.py` 스텁 구현. 손글씨·사인·사물 사진처럼 OCR로 못 다루는 영역을 이 경로가 맡을 예정.
+```
+core/                채널 무관 핵심 로직(OCR·분류·PDF·동영상·저장소·파이프라인)
+  ├─ classify/        이미지 유형 분류 게이트
+  ├─ ocr/             Tesseract OCR 엔진 + 구조화 스텁
+  ├─ pdf/             PDF → 페이지 이미지 렌더링
+  ├─ video/           동영상 → 프레임 샘플링
+  ├─ vision/          이미지 설명 스텁(비전 모델 미연동)
+  ├─ storage/         SQLite 영속화
+  └─ pipeline.py       분기 라우팅(document/photo/ambiguous_*)
 
-### 2.3 멀티 OCR 프로바이더(클라우드) 연동 `[계획]`
-현재는 Tesseract 단일 엔진. 오늘 리서치(`docs/research/ocr-technology-trends.md`)에서 비교한 4개 클라우드 서비스를 선택적으로 연결하는 설계 방향:
+telegram_bot/          텔레그램 채널 어댑터 + 오케스트레이터 인프라
+  ├─ bot.py            Application 엔트리(polling)
+  ├─ config.py         봇 설정(토큰 등)
+  ├─ handlers/         텔레그램 메시지 → core 파이프라인 호출
+  └─ orchestrator/      워커 위임 인프라(OCR 로직과 무관한 별도 관심사)
 
-| 서비스 | 리서치 근거 요약(원문 인용) |
-|---|---|
-| AWS Textract | "레이아웃 인지형 OCR, 표/키-값/체크박스까지 구조화 JSON 출력...복잡 문서·폼에서 높은 정확도" |
-| Azure Document Intelligence | "사전학습 모델(영수증·송장·명함 등) 제공...표/폼 구조화 추출 최상위권, 2026 벤치마크에서 정확도 1위권" |
-| Naver CLOVA OCR | "한국어·영어·일본어 특화, 영수증/사업자등록증 등 도메인 모델 제공...한글 필기체 인식 지원" |
-| Google Cloud Vision API | "순수 텍스트 추출에 특화...처리 속도 최상위" |
+web/                   웹 채널
+  ├─ backend/           FastAPI(core 파이프라인 호출)
+  └─ frontend/          Next.js(App Router)
+```
 
-**설계 방향**(구현 아님 — 계획 단계):
-- **프로바이더 추상화 레이어**: `core/ocr/engine.py`의 `extract_text()`를 인터페이스로 일반화해, Tesseract를 기본 프로바이더로 두고 AWS Textract/Azure Document Intelligence/Naver CLOVA/Google Vision을 선택적으로 붙일 수 있는 provider 패턴으로 확장(예: `OcrProvider` 프로토콜 + `TesseractProvider`/`TextractProvider`/... 구현체).
-- **폴백 트리거 지점**: `core/classify/engine.py`의 `ambiguous`/`photo` 분기(현재 Tesseract confidence가 낮게 나오는 지점)에서, 설정된 클라우드 프로바이더가 있으면 그쪽으로 재시도하는 옵션. 즉 "Tesseract confidence 낮음 → 클라우드 API 폴백"을 `core/pipeline.py`의 분기 로직에 자연스럽게 얹는 방향.
-- **자격증명/비용 관리**: 각 클라우드 API 키(AWS/Azure/Naver/Google)를 `.env`에 프로바이더별로 등록, 사용자가 선택적으로 활성화(키 없으면 그 프로바이더 비활성 = Tesseract만 동작하는 현재 상태 그대로 유지). 클라우드 API는 비용이 발생하므로(리서치 문서에 페이지당 단가 비교 있음) 기본값은 off, 명시적 옵트인.
-- 이 항목은 설계 방향 정리 단계이며, 실제 provider 인터페이스·클라우드 SDK 연동 코드는 아직 작성되지 않았다.
+- **원칙**: `core/`는 어떤 입력 채널(텔레그램/웹/향후 Discord 등)에도 종속되지 않는다. `telegram_bot/handlers/`와
+  `web/backend/routes.py`는 각자의 입력 형식(Telegram Update, HTTP UploadFile)을 bytes로 변환해 `core/`의
+  동일 함수(`process_image`, `process_pdf`, `process_video`)를 호출하는 얇은 어댑터다.
+- **검증(실측)**: `core/` 내부 상호 import는 전부 `from core.xxx import`, `telegram_bot/handlers/*.py`·
+  `web/backend/*.py`는 `from core.xxx import`를 사용하며 옛 `from telegram_bot.{ocr,classify,pdf,video,vision,storage}`
+  경로 참조는 0건(2026-08-22 grep 확인).
 
-### 2.4 채널 확장(Discord/Slack) `[계획]`
-현재 텔레그램만 구현. 아직 착수 전.
+---
 
-### 2.5 PDF 임베디드 이미지 별도 추출 `[계획 — 스코프 외 명시]`
-현재는 페이지 전체 렌더링으로만 커버. PDF 내부 XObject(임베디드 이미지) 개별 파싱은 하지 않음(과설계 방지 목적으로 의도적 제외 — 필요성 재검토 시 별도 지시서).
+## 2. 이미지 유형 분류 게이트 `구현됨`
 
-### 2.6 kong-bot 자동 push 안정성 `[관찰 필요]`
-§10-B(자격증명 공유해 kong-bot이 완료 시 자동으로 ocrlakebot API 호출)를 설정했으나, 실제 텔레그램 전송 성공 여부가 불확실했던 이력이 있음(§10-A-3 실측 기록 참고). 향후 재발 시 관찰 필요.
+파일: `core/classify/engine.py`
+
+```python
+def classify_image(image_bytes: bytes, lang: str = "kor+eng") -> Literal["document", "photo", "ambiguous"]
+```
+
+**판정 로직**: Tesseract `image_to_data`로 단어별 confidence를 뽑아 (신뢰도 있는 단어 수, 평균 confidence)를
+계산한 뒤 임계값으로 3분류한다.
+
+| 상수 | 값 | 의미 |
+|---|---|---|
+| `_MIN_WORDS_FOR_DOCUMENT` | 5 | 이 이상 단어 수 + confidence 조건 만족 시 `document` |
+| `_MIN_AVG_CONF_FOR_DOCUMENT` | 60.0 | document 판정 최소 평균 confidence |
+| `_MAX_WORDS_FOR_PHOTO` | 2 | 이 이하 단어 수 + confidence 조건 만족 시 `photo` |
+| `_MAX_AVG_CONF_FOR_PHOTO` | 40.0 | photo 판정 최대 평균 confidence |
+
+- 위 두 조건 모두에 해당하지 않으면 `ambiguous`.
+- 임계값은 코드 주석에 "실측(스모크 테스트)으로 조정된 값"으로 명시되어 있음 — 정밀 튜닝된 통계적 값은 아님.
+
+---
+
+## 3. OCR 엔진 `구현됨`
+
+파일: `core/ocr/engine.py`
+
+- Tesseract(`pytesseract.image_to_string`) 기반.
+- **지원 포맷**(`ALLOWED_FORMATS`): `JPEG`, `PNG`, `WEBP`, `BMP`, `TIFF`.
+- 기본 언어: `kor+eng`.
+- `image.verify()` → 재오픈 → 포맷 검증 → RGB/L 모드 변환 후 OCR 수행.
+- 지원 외 포맷·손상 이미지는 `UnsupportedImageError` 발생.
+
+---
+
+## 4. PDF 처리 `구현됨`
+
+파일: `core/pdf/engine.py`
+
+```python
+async def process_pdf(pdf_bytes: bytes, lang: str = "kor+eng") -> PdfOcrResult
+```
+
+- `pdf2image.convert_from_bytes`(내부적으로 poppler 바이너리 사용)로 각 페이지를 PNG 이미지로 렌더링(dpi=200).
+- 렌더링된 페이지 이미지를 **기존 `core.pipeline.process_image`에 그대로 재사용**(분류/OCR 로직 재구현 없음).
+- 페이지 수 상한 `MAX_PDF_PAGES = 30`(초과 시 앞부분만 처리, 경고 로그).
+- 결과: 페이지별 `PdfPageResult` 리스트 + `[페이지 N]\n텍스트` 형태로 이어붙인 `combined_text`.
+- **PDF 내부 스캔 이미지/서명/손글씨**: 페이지 전체를 이미지로 렌더링하는 방식이라 자동으로 커버되지만,
+  PDF 내부 XObject(임베디드 이미지) 개별 추출은 하지 않는다(스코프 제외, §14 로드맵 참고).
+
+---
+
+## 5. 동영상 처리 `구현됨`
+
+파일: `core/video/engine.py`
+
+```python
+async def process_video(video_bytes, lang="kor+eng", sample_interval_sec=2.5, max_frames=30) -> VideoOcrResult
+```
+
+- OpenCV(`cv2.VideoCapture`)로 임시파일 기록 후 프레임 접근.
+- 기본 샘플링 간격 `DEFAULT_SAMPLE_INTERVAL_SEC = 2.5`초, 최대 프레임 수 `MAX_FRAMES = 30`.
+- 각 프레임을 `core.pipeline.process_image`에 재사용 호출.
+- `document` 또는 `ambiguous_ocr`로 분류되고 텍스트가 있는 프레임만 `document_frames`에 채택,
+  `photo` 판정 프레임은 스킵.
+- 결과: 채택된 프레임 목록(`timestamp_sec` 포함) + 이어붙인 `combined_text`.
+- 프레임별 처리 중 예외는 개별 프레임만 스킵(전체 실패로 전파하지 않음).
+
+---
+
+## 6. 분기 파이프라인 `구현됨`
+
+파일: `core/pipeline.py`
+
+```python
+async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
+```
+
+`PipelineResult(route, text, description, note)` — `route`는 다음 4종:
+
+| route | 조건 | 내용 |
+|---|---|---|
+| `document` | classify=document | `extract_text()` 결과가 `text`에 채워짐 |
+| `photo` | classify=photo | `image_describe()` 호출 시도 → 스텁이라 `note`에 미구현 메시지 |
+| `ambiguous_ocr` | classify=ambiguous, OCR 텍스트≥10자(`AMBIGUOUS_OCR_MIN_CHARS`) | `text` 채워짐(OCR 채택) |
+| `ambiguous_photo` | classify=ambiguous, OCR 텍스트<10자 | photo와 동일하게 describe 시도 → note |
+
+- PDF/동영상 파이프라인이 이 함수를 그대로 재사용하므로, `route`는 저장소 스키마에서 `pdf_document`,
+  `video_frames`로 별도 확장(§7 참고) — 페이지/프레임 단위의 개별 `route`는 `structured_json`에 기록.
+
+---
+
+## 7. 저장소(SQLite) `구현됨`
+
+파일: `core/storage/db.py` — DB 경로: `data/ocr_lake.db`(레포 루트 기준, `.gitignore` 처리됨).
+
+### `ocr_records` 테이블 (실측 스키마)
+
+| 컬럼 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | INTEGER | PK AUTOINCREMENT | |
+| `created_at` | TEXT | NOT NULL, DEFAULT now | |
+| `source` | TEXT | NOT NULL, CHECK IN ('telegram','web') | 어느 채널에서 처리됐는지 |
+| `image_path` | TEXT | nullable | 저장된 원본 파일 상대경로 |
+| `route` | TEXT | NOT NULL, CHECK IN ('document','photo','ambiguous_ocr','ambiguous_photo','pdf_document','video_frames') | |
+| `extracted_text` | TEXT | nullable | |
+| `description` | TEXT | nullable | |
+| `structured_json` | TEXT | nullable, JSON 직렬화 | PDF 페이지별/동영상 프레임별 상세 |
+| `chat_id` | INTEGER | nullable | 텔레그램 발신 chat id(웹 경로는 null) |
+
+- 인덱스: `idx_ocr_records_created_at`(`created_at DESC`).
+- API/프론트 응답 시 `record_to_dict()`가 스네이크케이스 → camelCase 변환(naming-standard.md).
+
+---
+
+## 8. 텔레그램 봇 `구현됨`
+
+파일: `telegram_bot/bot.py`, `telegram_bot/handlers/{ocr_handlers,pdf_video_handlers,common}.py`
+
+### 명령
+- `/start` — 사용 안내.
+- `/structure` — 마지막 OCR 텍스트를 구조화(현재 스텁 → 미구현 메시지 반환, §12 참고).
+
+### 메시지 핸들러(실측 — `build_application()` 등록 순)
+| 핸들러 | 트리거 | 처리 |
+|---|---|---|
+| `handle_photo` | `filters.PHOTO \| filters.Document.IMAGE` | `core.pipeline.process_image` |
+| `handle_pdf` | `filters.Document.PDF` | `core.pdf.process_pdf` |
+| `handle_video` | `filters.VIDEO \| filters.Document.VIDEO` | `core.video.process_video` |
+
+- 권한 체크: `is_allowed()`(`telegram_bot/handlers/common.py`) — `TELEGRAM_ALLOWED_CHAT_IDS` 설정 시 해당
+  chat_id만 허용, 미설정 시 전체 허용.
+- 파일 크기 제한: 이미지/PDF는 `config.max_image_size_mb`(기본 20MB), 동영상은 그 5배.
+- 처리 결과는 `save_record_safely()`로 DB 저장(저장 실패해도 텔레그램 응답 흐름은 유지 — try/except 격리).
+
+---
+
+## 9. 웹 API(FastAPI) `구현됨`
+
+파일: `web/backend/main.py`, `web/backend/routes.py`
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/health` | 헬스체크, `{"status":"ok"}` |
+| POST | `/api/upload` | multipart 파일 업로드. `content_type`으로 이미지/PDF/동영상 자동 분기 |
+| GET | `/api/records?page=&size=` | 이력 목록(페이징, 최신순) |
+| GET | `/api/records/{id}` | 단건 상세(없으면 404) |
+
+### `/api/upload` 응답 스키마(camelCase)
+```json
+{
+  "id": 1, "createdAt": "2026-08-22 ...", "source": "web",
+  "imagePath": "data/uploads/xxxx.png", "route": "document",
+  "extractedText": "...", "description": null,
+  "structuredJson": null, "chatId": null
+}
+```
+
+### `/api/records` 응답
+```json
+{ "records": [ ...위 스키마... ], "total": 5, "page": 1, "size": 20 }
+```
+
+### 보안(실측)
+- 이미지: PIL 재오픈 검증 + `ALLOWED_FORMATS` 화이트리스트.
+- PDF: `application/pdf` content-type만 라우팅, `process_pdf` 자체 파싱 실패 시 400(위장 실행파일도 이 경로로 자동 차단).
+- 동영상: `video/mp4`, `video/quicktime`, `video/webm`, `video/x-msvideo` content-type만 라우팅.
+- 업로드 파일 저장명은 서버에서 `uuid4` 랜덤 생성(원본 파일명 미신뢰).
+- 업로드 크기 상한: 이미지/PDF 20MB(`MAX_UPLOAD_BYTES`), 동영상 100MB(`MAX_VIDEO_BYTES`).
+- CORS: `localhost:3000`, `localhost:3001`(및 127.0.0.1 동일)만 허용.
+
+---
+
+## 10. 웹 프론트(Next.js) `구현됨`
+
+디렉토리: `web/frontend/`(App Router, TypeScript, Tailwind)
+
+| 라우트 | 파일 | 기능 |
+|---|---|---|
+| `/` | `app/page.tsx` | 업로드 화면(`UploadCard`) — 드래그앤드롭/파일선택, 결과(텍스트 또는 사진/미구현 안내) 표시 |
+| `/records` | `app/records/page.tsx` | 이력 목록(`RecordList`) — 테이블, 페이징 |
+| `/records/[id]` | `app/records/[id]/page.tsx` | 이력 상세(`RecordDetail`) |
+
+- `lib/api.ts`: 백엔드 API 클라이언트(`uploadImage`, `fetchRecords`, `fetchRecord`). `NEXT_PUBLIC_API_BASE`
+  환경변수로 백엔드 주소 지정(기본 `http://localhost:8000`).
+- `lib/types.ts`, `lib/route-label.ts`: `OcrRoute` 타입 및 라벨/배지 맵을 6종 route(document/photo/
+  ambiguous_ocr/ambiguous_photo/pdf_document/video_frames) 전부에 대해 정의.
+- 접근성: 시맨틱 마크업, `aria-live`(로딩/에러), 폼 label 연결. 375px 뷰포트 좌우 잘림 없음(Playwright 실측 확인).
+- 디자인: CSS 변수 기반 토큰(`--radius-md`, `--info` 등), 카드/배지 컴포넌트 스타일.
+
+---
+
+## 11. 오케스트레이터 인프라 `구현됨`
+
+디렉토리: `telegram_bot/orchestrator/`(OCR 로직과 무관한 별도 관심사 — 이 프로젝트를 운영하는 워크플로 인프라)
+
+- **구조**: `protocol/u/`(유저 메시지 큐) → `protocol/a/`(오케스트레이터가 작성하는 지시서, `a_{NN}_{topic}.txt`)
+  → 워커가 `ar_{NN}_{topic}.txt`로 응답 → 종결 시 `protocol/done/`으로 아카이브.
+- **역할 분리**: 오케스트레이터(`och.txt` 역할 문서)는 유저 메시지 정제 + 지시서 작성 + 워커 관제만 담당,
+  실무(코드 구현/조사)는 워커(`worker_1.txt` 역할, 본 문서 작성 주체)가 수행.
+- **kong-bot 연동**(och.txt §10-A~C 실측 요약):
+  - §10-A `SHARED_IN`: kong-bot(별도 프로젝트, `~/git/kong-bot`)이 발행하는 read-only manifest
+    (`~/git/kong-bot/telegram_bot/orchestrator/shared_out/manifest.json`)를 ocr-lake가 pull 방식으로 참조.
+    OCR 테스트 샘플(이미지/PDF 등) 확보에 사용(a_04에서 kong-bot 샘플 PDF 2건 실제 활용).
+  - §10-B `OUTBOUND`: ocrlakebot 토큰을 kong-bot에 공유해, kong-bot이 작업 완료 시 ocrlakebot API로
+    직접 결과물을 사용자에게 push하는 자동 전달 경로(수동 포워딩 대체).
+  - §10-C: 라이선스 정책이 kong-bot과 동일(§13 참고).
+
+---
+
+## 12. AI 구조화/비전 — 스텁 상태 `미구현`
+
+| 모듈 | 파일 | 현재 상태 |
+|---|---|---|
+| 텍스트 구조화 | `core/ocr/structurer.py` | `structure_text()` 호출 시 항상 `StructurerNotConfiguredError` 발생. AI 모델(Claude/GPT) 미연동. |
+| 이미지 설명 | `core/vision/describer.py` | `image_describe()` 호출 시 항상 `DescriberNotConfiguredError` 발생. 비전 모델 미연동. |
+
+- 두 스텁 모두 "모델 결정되면 이 모듈 안에서 SDK 호출부만 구현하면 되고, 호출부(pipeline/handlers)는
+  변경 불요"하도록 인터페이스가 이미 고정되어 있음(코드 주석 확인).
+- `pipeline.process_image`의 `photo`/`ambiguous_photo` 경로가 `image_describe()`를 호출하지만 스텁이라
+  항상 `note`(미구현 안내 메시지)로 폴백 — **실제 이미지 설명 기능은 아직 사용자에게 제공되지 않음**.
+
+---
+
+## 13. 라이선스 `구현됨`
+
+- `PolyForm Noncommercial License 1.0.0`(`./LICENSE`, kong-bot과 동일 조건 — och.txt §10-C).
+- 개인/비영리 용도(연구·학습·취미·비영리·교육) 무료.
+- 상업적 사용은 별도 유료 라이선스 계약 필요.
+
+---
+
+## 14. 로드맵(앞으로 구현될 것)
+
+> 아래 항목은 전부 `계획` — 착수 전이거나 스텁 상태. 일정·모델 확정 없음.
+
+### 14-1. AI 구조화 파싱 `계획`
+- `core/ocr/structurer.py` 구현 — 영수증/명함 등 문서유형별 스키마 추출(예: 금액·날짜·상호명 필드화).
+- 사용 모델(Claude/GPT 등) 미정. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` 설정 후 착수 예정(코드 주석 근거).
+
+### 14-2. 이미지 설명(비전 모델) `계획`
+- `core/vision/describer.py` 구현 — 손글씨/사인/사물 사진 등 OCR로 커버 안 되는 케이스를 비전 모델로 설명.
+- classify_image의 저신뢰도 판정(photo/ambiguous)이 이 경로로 자연스럽게 폴백하도록 이미 설계되어 있어,
+  모델만 붙이면 별도 라우팅 로직 변경 없이 활성화 가능(현재 검증된 구조).
+
+### 14-3. 채널 확장(Discord/Slack) `계획`
+- 현재 텔레그램 채널만 구현. `core/`가 채널 무관 구조로 분리되어 있어(§1) 신규 채널 어댑터 추가 시
+  `core.pipeline.process_image` 등을 그대로 재사용 가능한 구조는 마련되어 있으나, 실제 어댑터 구현은
+  아직 착수 전.
+
+### 14-4. 멀티 클라우드 OCR 프로바이더 연동(AWS·Microsoft·Naver·Google) `계획`
+- 현재는 Tesseract(로컬 오픈소스) 단일 엔진만 연동돼 있다(§3). 유저 요청으로 다음 4개 클라우드 OCR API 연동을
+  로드맵에 추가한다 — 비교 근거는 이미 작성된 `docs/research/ocr-technology-trends.md` 참고(중복 리서치 불필요):
+  - **AWS Textract**: 표/폼/키-값 구조화 추출에 강함. 복잡 문서(영수증·송장) 정확도 높음.
+  - **Microsoft Azure Document Intelligence**(구 Form Recognizer): 사전학습 영수증/명함/송장 모델 제공,
+    2026 벤치마크 기준 정확도 상위권.
+  - **Naver CLOVA OCR**: 한국어·영수증/사업자등록증 등 국내 도메인 특화 모델, 한글 필기체 지원.
+  - **Google Cloud Vision API**: 순수 텍스트 추출 속도 최상위, 비용 경쟁력.
+- **설계 방향(제안, 미착수)**:
+  1. `core/ocr/` 아래 provider 인터페이스 추상화(예: `OcrProvider` 프로토콜 — `extract_text(bytes, lang) -> str`
+     또는 confidence 포함 구조화 반환) — 지금의 Tesseract 단일 함수 호출부(`core/ocr/engine.py`)를
+     provider 중 하나로 승격, 나머지 클라우드 provider를 같은 인터페이스로 추가.
+  2. **폴백 트리거**: `core/classify/engine.py`의 저신뢰도 판정(ambiguous/photo)에서 Tesseract 결과가
+     불충분할 때, 설정된 클라우드 provider로 재시도하는 옵션(§파이프라인 확장, `core/pipeline.py`
+     `_describe_or_note`류 분기에 준하는 방식).
+  3. **자격증명 관리**: 각 클라우드 API 키(AWS/Azure/Naver/Google)는 `.env`에 provider별 키로 저장,
+     설정 안 된 provider는 자동 비활성(현재 `structurer.py`/`describer.py`의 "미설정 시 스텁 에러" 패턴과 동일).
+     사용자가 선택적으로 어떤 provider를 활성화할지 설정 가능하게.
+  4. **비용 고려**: 클라우드 API는 건당 과금이므로, Tesseract로 충분한 케이스(고신뢰도 document)는 클라우드
+     호출을 건너뛰어 비용 최소화(§계층형 파이프라인 아이디어, 오케스트레이터가 초기 설계 논의에서 제안한
+     "confidence 기반 3단계 분기"와 일치하는 방향).
+- 일정·우선순위 미정 — 착수 전.
+
+### 14-5. PDF 내부 임베디드 이미지(XObject) 개별 추출 `계획 — 스코프 명시적 제외`
+- 현재는 PDF 페이지 전체를 이미지로 렌더링하는 방식으로만 처리(§4). PDF 내부에 개별 삽입된 이미지
+  객체(XObject)를 따로 파싱해 추출하는 기능은 a_04 지시서에서 "과설계 방지" 이유로 명시적으로
+  스코프 제외됨. 필요성이 확인되면 별도 작업으로 검토.
+
+### 14-6. kong-bot 자동 push 안정성 `관찰 필요`
+- och.txt §10-B의 자동 push 경로(kong-bot이 ocrlakebot API로 직접 결과 전달)가 과거 한 차례 전달
+  실패 사례가 있었음(§10-A-3의 정정 기록 — 원인은 봇-봇 DM 차단이 아니라 다른 요인으로 추정, 확정 원인
+  미규명). 현재는 manifest pull(§10-A)이 폴백 경로로 병행 운영 중. 재발 시 원인 규명 필요.
