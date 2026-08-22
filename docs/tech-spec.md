@@ -396,9 +396,10 @@ async def process_image(image_bytes: bytes, lang="kor+eng") -> PipelineResult
   임베딩 API(OpenAI/Cohere 등)를 선택적으로 붙이는 옵션도 검토 가능.
 - pgvector 컬럼(`ocr_records.embedding vector(768)`)은 스키마만 유지, 실제 값은 채우지 않음(항상 NULL).
 
-### 14-1. AI 구조화 파싱 `계획`
-- `core/ocr/structurer.py` 구현 — 영수증/명함 등 문서유형별 스키마 추출(예: 금액·날짜·상호명 필드화).
-- 사용 모델(Claude/GPT 등) 미정. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` 설정 후 착수 예정(코드 주석 근거).
+### 14-1. AI 구조화 파싱 `구현됨`
+- `core/ocr/structurer.py` — 로컬 MLX(mlx-community/Qwen2.5-7B-Instruct-4bit)로 영수증/명함/일반문서
+  유형별 스키마 추출. 문서유형은 `core/ocr/doc_type_detector.py`(키워드 휴리스틱→MLX 폴백)가 자동 판별.
+  웹 API `POST /api/records/{id}/structure` 로 온디맨드 호출 가능.
 
 ### 14-2. 이미지 설명(비전 모델) `계획`
 - `core/vision/describer.py` 구현 — 손글씨/사인/사물 사진 등 OCR로 커버 안 되는 케이스를 비전 모델로 설명.
